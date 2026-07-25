@@ -104,10 +104,6 @@ async function request(
   const started = Date.now();
 
   const headers = new Headers(init.headers);
-  if (config.RUNPOD_API_KEY) {
-    headers.set("Authorization", `Bearer ${config.RUNPOD_API_KEY}`);
-  }
-
   logger.info({ requestId, method: init.method ?? "GET", path }, "RunPod request started");
 
   try {

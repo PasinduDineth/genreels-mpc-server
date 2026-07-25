@@ -4,7 +4,7 @@ import { config } from "./config.js";
 export const logger = pino({
   level: config.LOG_LEVEL,
   redact: {
-    paths: ["req.headers.authorization", "authorization", "apiKey", "RUNPOD_API_KEY"],
+    paths: ["req.headers.authorization", "authorization", "apiKey"],
     censor: "[REDACTED]",
   },
   transport:

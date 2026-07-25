@@ -21,7 +21,7 @@ set -Eeuo pipefail
 #   image -> Ollama/TTS/video stopped; SDXL image model active
 #   video -> Ollama/TTS/image stopped; HunyuanVideo-1.5 image-to-video active
 #
-# Control API (bearer authentication when GATEWAY_API_KEY is set):
+# Control API:
 #   GET  /health
 #   GET  /resources
 #   GET  /control/status
@@ -61,7 +61,6 @@ set -Eeuo pipefail
 #   TTS_BACKEND=official
 #   TTS_LAZY_LOAD=true
 #   TTS_PREFLIGHT=true             # synthesize a short WAV during setup
-#   GATEWAY_API_KEY=...            # strongly recommended for the public proxy
 #   MCP_REPO_URL=https://github.com/OWNER/REPO.git
 #   MCP_ENABLED=true
 #   MCP_BRANCH=main
@@ -70,7 +69,7 @@ set -Eeuo pipefail
 #
 # ==============================================================================
 
-SCRIPT_VERSION="10.3.0"
+SCRIPT_VERSION="10.4.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 WORKSPACE="${WORKSPACE:-/workspace}"
@@ -145,6 +144,7 @@ MCP_PUBLIC_GATEWAY_URL="${MCP_PUBLIC_GATEWAY_URL:-}"
 
 # Heavy model/cache data must never live on the 50 GB /workspace volume.
 OLLAMA_MODELS_DEFAULT="$WORKSPACE/.ollama/models"
+OLLAMA_MODELS="${OLLAMA_MODELS:-$OLLAMA_MODELS_DEFAULT}"
 
 
 mkdir -p "$(dirname "$VIDEO_VENV")"
@@ -1620,33 +1620,6 @@ APP = FastAPI(
     docs_url="/gateway/docs",
     openapi_url="/gateway/openapi.json",
 )
-
-GATEWAY_API_KEY = os.getenv("GATEWAY_API_KEY", "").strip()
-
-
-@APP.middleware("http")
-async def require_gateway_auth(request: Request, call_next):
-    # Setup checks and services on the pod use loopback. Public proxy traffic
-    # must authenticate whenever a gateway key has been configured. Generated
-    # media uses unguessable filenames and remains public so MCP clients can
-    # render returned media URLs without custom request headers.
-    client_host = request.client.host if request.client else ""
-    request_host = request.url.hostname or ""
-    is_loopback_request = (
-        client_host in {"127.0.0.1", "::1"}
-        and request_host in {"127.0.0.1", "::1", "localhost"}
-    )
-    public_media = request.url.path.startswith("/files/generated/")
-    if GATEWAY_API_KEY and not public_media and not is_loopback_request:
-        authorization = request.headers.get("authorization", "")
-        scheme, _, token = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not secrets.compare_digest(token, GATEWAY_API_KEY):
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Missing or invalid bearer token."},
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    return await call_next(request)
 
 transition_lock = asyncio.Lock()
 transition_task: asyncio.Task | None = None
@@ -3158,7 +3131,6 @@ if [[ "$MCP_ENABLED" == "true" ]]; then
       PORT="$MCP_PORT" \
       RUNPOD_BASE_URL="http://127.0.0.1:8000" \
       RUNPOD_PUBLIC_BASE_URL="$MCP_PUBLIC_GATEWAY_URL" \
-      RUNPOD_API_KEY="${GATEWAY_API_KEY:-}" \
       node "$MCP_DIR/dist/server.js" \
       >>"$MCP_LOG" 2>&1 &
     echo $! >"$RUN_DIR/mcp-server.pid"
@@ -3636,10 +3608,6 @@ Logs:
   Video backend: HunyuanVideo-1.5 480p I2V Step-Distilled (public, async)
   FlashAttention: installed separately with --no-build-isolation
   Control:    $CONTROL_LOG
-
-SECURITY:
-  Set GATEWAY_API_KEY before running this script to protect public control and
-  inference requests. Generated media URLs remain publicly readable.
 
 ===============================================================================
 EOF

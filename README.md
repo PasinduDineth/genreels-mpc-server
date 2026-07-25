@@ -34,8 +34,6 @@ Set:
 RUNPOD_BASE_URL=https://YOUR_POD_ID-8000.proxy.runpod.net
 ```
 
-For public use, set `GATEWAY_API_KEY` before running `run_pod_config.sh`, and set `RUNPOD_API_KEY` to the same value in this server's `.env`. If `GATEWAY_API_KEY` is empty, the gateway remains unauthenticated for backward compatibility.
-
 ## 2. Install and run locally
 
 ```bash
@@ -181,8 +179,6 @@ Logs are structured with Pino and include:
 - video job ID/status/stage
 - failures with stack/context
 
-Secrets such as `Authorization` are redacted.
-
 Set verbosity in `.env`:
 
 ```dotenv
@@ -210,21 +206,11 @@ The gateway returns an image response containing `data[0].url`. The MCP server c
 
 Video submission is asynchronous. The gateway returns `job_id` and `status_url`. The MCP server exposes both an asynchronous tool pair and a convenience wait-until-complete tool.
 
-## Security before production
+## Network access
 
-The RunPod script supports bearer authentication through `GATEWAY_API_KEY`. If it is left empty, anyone who obtains the proxy URL may consume GPU resources.
-
-Before production:
-
-- set a strong `GATEWAY_API_KEY`, or put an authenticated reverse proxy in front of RunPod
-- keep the RunPod secret only on the MCP server
-- do not expose low-level `/control/*` operations as public MCP tools
-- add per-user rate limiting and quotas
-- retain the remote-image URL validation and download limits when changing the image ingestion code
-- persist jobs in a database if multiple MCP instances will run
-- add a queue if multiple users can generate media concurrently
-
-For this development version, only use trusted image URLs and treat the RunPod proxy URL as sensitive.
+The gateway and MCP endpoint do not require authentication. Anyone with the
+RunPod proxy URLs can invoke them and consume GPU resources, so keep the URLs
+private.
 
 ## Troubleshooting
 
