@@ -69,7 +69,7 @@ set -Eeuo pipefail
 #
 # ==============================================================================
 
-SCRIPT_VERSION="10.4.1"
+SCRIPT_VERSION="10.5.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 WORKSPACE="${WORKSPACE:-/workspace}"
@@ -1603,6 +1603,7 @@ OLLAMA_BASE = "http://127.0.0.1:11434"
 TTS_BASE = "http://127.0.0.1:8880"
 IMAGE_BASE = f"http://127.0.0.1:{IMAGE_PORT}"
 VIDEO_BASE = f"http://127.0.0.1:{VIDEO_PORT}"
+MCP_BASE = "http://127.0.0.1:8787"
 
 TTS_PID_FILE = RUN_DIR / "tts.pid"
 IMAGE_PID_FILE = RUN_DIR / "image.pid"
@@ -2553,6 +2554,14 @@ async def generic_proxy(
 @APP.get("/")
 async def root():
     return RedirectResponse("/gateway/docs")
+
+
+@APP.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"])
+async def mcp_proxy(request: Request):
+    # RunPod's proxy can inconsistently reject POST requests sent directly to
+    # a secondary exposed port. Carry MCP over the primary FastAPI HTTP port
+    # and forward it to the local Node transport instead.
+    return await generic_proxy(request, MCP_BASE, "/mcp")
 
 
 @APP.get("/health")
@@ -3534,7 +3543,7 @@ if [[ -n "${RUNPOD_POD_ID:-}" ]]; then
   log "Public Swagger: $PUBLIC_BASE/gateway/docs"
   log "Public status: $PUBLIC_BASE/control/status"
   if [[ "$MCP_ENABLED" == "true" && -f "$MCP_DIR/package.json" ]]; then
-    log "Public MCP connector URL: https://${RUNPOD_POD_ID}-${MCP_PORT}.proxy.runpod.net/"
+    log "Public MCP connector URL: https://${RUNPOD_POD_ID}-8000.proxy.runpod.net/mcp"
   fi
 fi
 

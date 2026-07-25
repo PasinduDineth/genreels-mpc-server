@@ -63,12 +63,16 @@ builds, and starts the MCP project beside it. `MCP_REPO_URL` is only needed
 when you upload the shell script by itself and want it to clone the project,
 or when you want each run to fetch the configured branch automatically.
 
-For RunPod's proxy, use the root URL as the ChatGPT connector URL. The server
-also keeps `/mcp` and `/api/mcp` as compatible transport aliases:
+For RunPod, MCP is forwarded through the primary FastAPI gateway because some
+RunPod proxy routes reject POST requests sent directly to secondary ports.
+Use this ChatGPT connector URL:
 
 ```text
-https://<pod-id>-8787.proxy.runpod.net/
+https://<pod-id>-8000.proxy.runpod.net/mcp
 ```
+
+Port `8787` remains the internal/direct MCP service and can still be used for
+local diagnostics.
 
 Expected startup log:
 
