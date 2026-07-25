@@ -7,6 +7,8 @@ import { logger } from "./logger.js";
 import { generateImage, getStatus, getVideoJob, health, startVideo, waitForVideo } from "./runpod.js";
 
 const MCP_PATH = "/mcp";
+const MCP_ALTERNATE_PATH = "/api/mcp";
+const MCP_POST_PATHS = new Set(["/", MCP_PATH, MCP_ALTERNATE_PATH]);
 const activeVideoJobs = new Set<string>();
 let generationOperationInProgress = false;
 
@@ -231,7 +233,15 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
   if (req.method === "GET" && url.pathname === "/") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ service: "runpod-ai-mcp-server", status: "ok", mcp: MCP_PATH }));
+    res.end(
+      JSON.stringify({
+        service: "runpod-ai-mcp-server",
+        status: "ok",
+        mcp: MCP_PATH,
+        connector_url: "/",
+        alternate_mcp: MCP_ALTERNATE_PATH,
+      }),
+    );
     return;
   }
 
@@ -248,14 +258,14 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  if (req.method === "OPTIONS" && url.pathname === MCP_PATH) {
+  if (req.method === "OPTIONS" && MCP_POST_PATHS.has(url.pathname)) {
     setCors(res);
     res.writeHead(204).end();
     return;
   }
 
   const allowedMethods = new Set(["POST", "GET", "DELETE"]);
-  if (url.pathname === MCP_PATH && req.method && allowedMethods.has(req.method)) {
+  if (MCP_POST_PATHS.has(url.pathname) && req.method && allowedMethods.has(req.method)) {
     setCors(res);
     const server = createMcpServer();
     const transport = new StreamableHTTPServerTransport({
