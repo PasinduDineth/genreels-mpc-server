@@ -69,7 +69,7 @@ set -Eeuo pipefail
 #
 # ==============================================================================
 
-SCRIPT_VERSION="10.5.0"
+SCRIPT_VERSION="10.5.1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 WORKSPACE="${WORKSPACE:-/workspace}"
@@ -2564,6 +2564,13 @@ async def mcp_proxy(request: Request):
     return await generic_proxy(request, MCP_BASE, "/mcp")
 
 
+@APP.api_route("/connector", methods=["GET", "POST", "DELETE", "OPTIONS"])
+async def connector_proxy(request: Request):
+    # Neutral public alias for proxies that reserve or filter the literal
+    # "/mcp" path. The local Node service still receives standard MCP traffic.
+    return await generic_proxy(request, MCP_BASE, "/mcp")
+
+
 @APP.get("/health")
 async def health():
     state = read_state()
@@ -3543,7 +3550,7 @@ if [[ -n "${RUNPOD_POD_ID:-}" ]]; then
   log "Public Swagger: $PUBLIC_BASE/gateway/docs"
   log "Public status: $PUBLIC_BASE/control/status"
   if [[ "$MCP_ENABLED" == "true" && -f "$MCP_DIR/package.json" ]]; then
-    log "Public MCP connector URL: https://${RUNPOD_POD_ID}-8000.proxy.runpod.net/mcp"
+    log "Public MCP connector path: /connector"
   fi
 fi
 

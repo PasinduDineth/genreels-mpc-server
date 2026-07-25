@@ -8,7 +8,8 @@ import { generateImage, getStatus, getVideoJob, health, startVideo, waitForVideo
 
 const MCP_PATH = "/mcp";
 const MCP_ALTERNATE_PATH = "/api/mcp";
-const MCP_POST_PATHS = new Set(["/", MCP_PATH, MCP_ALTERNATE_PATH]);
+const MCP_CONNECTOR_PATH = "/connector";
+const MCP_POST_PATHS = new Set(["/", MCP_PATH, MCP_ALTERNATE_PATH, MCP_CONNECTOR_PATH]);
 const activeVideoJobs = new Set<string>();
 let generationOperationInProgress = false;
 
@@ -240,6 +241,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
         mcp: MCP_PATH,
         connector_url: "/",
         alternate_mcp: MCP_ALTERNATE_PATH,
+        neutral_connector: MCP_CONNECTOR_PATH,
       }),
     );
     return;

@@ -65,10 +65,11 @@ or when you want each run to fetch the configured branch automatically.
 
 For RunPod, MCP is forwarded through the primary FastAPI gateway because some
 RunPod proxy routes reject POST requests sent directly to secondary ports.
-Use this ChatGPT connector URL:
+Use the neutral `/connector` alias. It avoids upstream platforms that reserve
+or filter the literal `/mcp` path:
 
 ```text
-https://<pod-id>-8000.proxy.runpod.net/mcp
+https://<pod-id>-<gateway-port>.proxy.runpod.net/connector
 ```
 
 Port `8787` remains the internal/direct MCP service and can still be used for
