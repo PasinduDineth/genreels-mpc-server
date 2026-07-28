@@ -64,7 +64,7 @@ function errorResult(error: unknown) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
-    { name: "runpod-ai-studio", version: "1.3.0" },
+    { name: "runpod-ai-studio", version: "1.3.1" },
     {
       instructions:
         "Use get_runpod_status before diagnosing availability. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",

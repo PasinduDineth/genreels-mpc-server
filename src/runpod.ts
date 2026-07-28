@@ -81,10 +81,18 @@ function isPrivateIp(address: string): boolean {
     normalized.startsWith("fea") || normalized.startsWith("feb");
 }
 
+function isTrustedOpenAiFileHost(hostname: string): boolean {
+  return hostname.toLowerCase() === "files.oaiusercontent.com";
+}
+
 async function validateRemoteImageUrl(url: URL): Promise<void> {
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new Error("Input image URL must use HTTP or HTTPS");
   }
+  // ChatGPT fileParams supplies a short-lived signed HTTPS URL on this
+  // OpenAI-controlled host. In some RunPod environments its DNS is routed
+  // through a private address, so the general SSRF DNS check would reject it.
+  if (url.protocol === "https:" && isTrustedOpenAiFileHost(url.hostname)) return;
   const addresses = await lookup(url.hostname, { all: true });
   if (addresses.length === 0 || addresses.some(({ address }) => isPrivateIp(address))) {
     throw new Error("Input image URL resolves to a private or local network address");
