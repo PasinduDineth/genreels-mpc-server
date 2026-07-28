@@ -318,6 +318,8 @@ export async function startVideo(input: {
   imageUrl: string;
   prompt: string;
   steps?: 4 | 8 | 12;
+  numFrames?: number;
+  fps?: number;
   seed?: number;
 }): Promise<VideoStartResult & { status_url_absolute: string }> {
   const image = await fetchImageBytes(input.imageUrl);
@@ -332,8 +334,8 @@ export async function startVideo(input: {
   form.append("prompt", input.prompt);
   form.append("width", "480");
   form.append("height", "832");
-  form.append("num_frames", "121");
-  form.append("fps", "24");
+  form.append("num_frames", String(input.numFrames ?? 121));
+  form.append("fps", String(input.fps ?? 24));
   form.append("steps", String(input.steps ?? 8));
   form.append("guidance_scale", "1.0");
   if (input.seed !== undefined) form.append("seed", String(input.seed));

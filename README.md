@@ -110,6 +110,14 @@ Recommended test order:
 
 `generate_video_and_wait` is retained as a backward-compatible alias, but it also returns immediately. Poll `check_video_job` for the final result.
 
+Video tools accept `num_frames` and `fps`. Frame counts must follow `4n + 1`:
+
+- Fast 5 seconds: `num_frames: 61`, `fps: 12`, `steps: 4`
+- Balanced 5 seconds: `num_frames: 81`, `fps: 16`
+- Quality 5 seconds: `num_frames: 121`, `fps: 24`
+
+The persistent HunyuanVideo pipeline remains loaded after a job completes. It unloads only when switching to TTS/off mode or restarting the video service.
+
 ## 4. Connect the local server to ChatGPT
 
 ChatGPT cannot reach `localhost` directly. Keep this MCP server local and expose it temporarily through HTTPS.

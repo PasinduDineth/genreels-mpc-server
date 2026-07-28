@@ -66,6 +66,21 @@ const openAiImageFileSchema = z.union([
   z.string().describe("ChatGPT platform file reference; the client replaces this with a downloadable file object."),
 ]).optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation.");
 
+const videoFrameCountSchema = z.number()
+  .int()
+  .min(25)
+  .max(121)
+  .refine((value) => (value - 1) % 4 === 0, "num_frames must follow 4n + 1")
+  .default(121)
+  .describe("Number of generated frames. Must follow 4n + 1. Use 61 with 12 FPS for a fast 5-second clip, 81 with 16 FPS for balanced, or 121 with 24 FPS for quality.");
+
+const videoFpsSchema = z.number()
+  .int()
+  .min(8)
+  .max(24)
+  .default(24)
+  .describe("Output frames per second. Approximate duration is (num_frames - 1) / fps seconds.");
+
 function getVideoImageUrl(args: { image_url?: string; image_file?: unknown }): {
   imageUrl: string;
   source: "url" | "chatgpt_file";
@@ -110,7 +125,7 @@ function errorResult(error: unknown) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
-    { name: "runpod-ai-studio", version: "1.5.0" },
+    { name: "runpod-ai-studio", version: "1.6.0" },
     {
       instructions:
         "Use get_runpod_status before diagnosing availability or to recover active video job IDs. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL and immediately returns a job ID. Poll check_video_job with that ID until completion. generate_video_and_wait is a backward-compatible asynchronous alias and also returns immediately; no video tool waits inside one MCP request.",
@@ -210,6 +225,8 @@ function createMcpServer(): McpServer {
         image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
         prompt: z.string().min(1).max(4000).describe("Motion/camera prompt describing how the input image should animate."),
         steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
+        num_frames: videoFrameCountSchema,
+        fps: videoFpsSchema,
         seed: z.number().int().nonnegative().optional(),
       },
       _meta: {
@@ -225,8 +242,15 @@ function createMcpServer(): McpServer {
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
         const image = getVideoImageUrl(args);
-        logger.info({ tool: "generate_video_from_image", imageSource: image.source, fileId: image.fileId, steps: args.steps }, "MCP tool invoked");
-        const result = await startVideo({ imageUrl: image.imageUrl, prompt: args.prompt, steps: args.steps, seed: args.seed });
+        logger.info({ tool: "generate_video_from_image", imageSource: image.source, fileId: image.fileId, steps: args.steps, numFrames: args.num_frames, fps: args.fps }, "MCP tool invoked");
+        const result = await startVideo({
+          imageUrl: image.imageUrl,
+          prompt: args.prompt,
+          steps: args.steps,
+          numFrames: args.num_frames,
+          fps: args.fps,
+          seed: args.seed,
+        });
         activeVideoJobs.add(result.job_id);
         return textResult(`Video job accepted. Job ID: ${result.job_id}`, {
           ok: true,
@@ -280,6 +304,8 @@ function createMcpServer(): McpServer {
         image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
         prompt: z.string().min(1).max(4000),
         steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
+        num_frames: videoFrameCountSchema,
+        fps: videoFpsSchema,
         seed: z.number().int().nonnegative().optional(),
       },
       _meta: {
@@ -295,8 +321,15 @@ function createMcpServer(): McpServer {
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
         const image = getVideoImageUrl(args);
-        logger.info({ tool: "generate_video_and_wait", imageSource: image.source, fileId: image.fileId, steps: args.steps }, "MCP tool invoked");
-        const submitted = await startVideo({ imageUrl: image.imageUrl, prompt: args.prompt, steps: args.steps, seed: args.seed });
+        logger.info({ tool: "generate_video_and_wait", imageSource: image.source, fileId: image.fileId, steps: args.steps, numFrames: args.num_frames, fps: args.fps }, "MCP tool invoked");
+        const submitted = await startVideo({
+          imageUrl: image.imageUrl,
+          prompt: args.prompt,
+          steps: args.steps,
+          numFrames: args.num_frames,
+          fps: args.fps,
+          seed: args.seed,
+        });
         activeVideoJobs.add(submitted.job_id);
         return textResult(`Video job accepted. Job ID: ${submitted.job_id}. Poll check_video_job until it completes.`, {
           ok: true,
