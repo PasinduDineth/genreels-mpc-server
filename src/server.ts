@@ -1,13 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
-import { generateSpeech, getStatus, getVideoJob, health, startVideo, waitForVideo } from "./runpod.js";
+import { generateSpeech, getStatus, getVideoJob, health, startVideo } from "./runpod.js";
 
 const MCP_PATH = "/mcp";
 const MCP_ALTERNATE_PATH = "/api/mcp";
@@ -15,6 +15,39 @@ const MCP_CONNECTOR_PATH = "/connector";
 const MCP_POST_PATHS = new Set(["/", MCP_PATH, MCP_ALTERNATE_PATH, MCP_CONNECTOR_PATH]);
 const activeVideoJobs = new Set<string>();
 let generationOperationInProgress = false;
+
+async function refreshActiveVideoJobs(): Promise<string[]> {
+  try {
+    const entries = await readdir(config.VIDEO_JOB_DIR, { withFileTypes: true });
+    const persistedActiveJobs = new Set<string>();
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && /^[0-9a-f]{32}\.json$/.test(entry.name))
+        .map(async (entry) => {
+          try {
+            const job = JSON.parse(await readFile(path.join(config.VIDEO_JOB_DIR, entry.name), "utf8")) as {
+              job_id?: unknown;
+              status?: unknown;
+            };
+            if (
+              typeof job.job_id === "string" &&
+              (job.status === "queued" || job.status === "processing")
+            ) {
+              persistedActiveJobs.add(job.job_id);
+            }
+          } catch (error) {
+            logger.warn({ err: error, file: entry.name }, "Could not read persisted video job state");
+          }
+        }),
+    );
+    activeVideoJobs.clear();
+    for (const jobId of persistedActiveJobs) activeVideoJobs.add(jobId);
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String(error.code) : "";
+    if (code !== "ENOENT") logger.warn({ err: error }, "Could not refresh persisted video jobs");
+  }
+  return [...activeVideoJobs];
+}
 
 type OpenAiFileParam = {
   download_url?: string;
@@ -77,10 +110,10 @@ function errorResult(error: unknown) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
-    { name: "runpod-ai-studio", version: "1.4.0" },
+    { name: "runpod-ai-studio", version: "1.5.0" },
     {
       instructions:
-        "Use get_runpod_status before diagnosing availability. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",
+        "Use get_runpod_status before diagnosing availability or to recover active video job IDs. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL and immediately returns a job ID. Poll check_video_job with that ID until completion. generate_video_and_wait is a backward-compatible asynchronous alias and also returns immediately; no video tool waits inside one MCP request.",
     },
   );
 
@@ -99,6 +132,7 @@ function createMcpServer(): McpServer {
     async (args) => {
       let acquiredGenerationLock = false;
       try {
+        await refreshActiveVideoJobs();
         if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
         if (activeVideoJobs.size > 0) {
           throw new Error("Cannot switch to TTS mode while a video job is active. Check the video job until it completes or fails.");
@@ -146,8 +180,19 @@ function createMcpServer(): McpServer {
     },
     async () => {
       try {
+        const activeJobIds = await refreshActiveVideoJobs();
         const [healthResult, status] = await Promise.all([health(), getStatus()]);
-        return textResult("RunPod gateway is reachable.", { ok: true, health: healthResult, status });
+        return textResult(
+          activeJobIds.length > 0
+            ? `RunPod gateway is reachable. Active video job IDs: ${activeJobIds.join(", ")}`
+            : "RunPod gateway is reachable. There are no MCP-tracked active video jobs.",
+          {
+            ok: true,
+            health: healthResult,
+            status,
+            active_video_job_ids: activeJobIds,
+          },
+        );
       } catch (error) {
         return errorResult(error);
       }
@@ -174,6 +219,7 @@ function createMcpServer(): McpServer {
     async (args) => {
       let acquiredGenerationLock = false;
       try {
+        await refreshActiveVideoJobs();
         if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
         if (activeVideoJobs.size > 0) throw new Error("A video job is already active. Check that job before submitting another one.");
         generationOperationInProgress = true;
@@ -226,9 +272,9 @@ function createMcpServer(): McpServer {
   server.registerTool(
     "generate_video_and_wait",
     {
-      title: "Generate 5-second video and wait",
+      title: "Generate 5-second video (legacy async alias)",
       description:
-        "Generate a 5-second HunyuanVideo clip from a ChatGPT-generated/uploaded image or public image URL and wait until the MP4 is complete. Prefer image_file for an image created or attached in this chat. Use only when the user explicitly wants a finished clip in one operation; this can take several minutes.",
+        "Backward-compatible alias for generate_video_from_image. Submit a 5-second HunyuanVideo job from a ChatGPT-generated/uploaded image or public image URL and return the job ID immediately. This tool does not wait, because video rendering can exceed MCP request timeouts. Poll check_video_job with the returned job_id until completion.",
       inputSchema: {
         image_file: openAiImageFileSchema,
         image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
@@ -243,6 +289,7 @@ function createMcpServer(): McpServer {
     async (args) => {
       let acquiredGenerationLock = false;
       try {
+        await refreshActiveVideoJobs();
         if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
         if (activeVideoJobs.size > 0) throw new Error("A video job is already active. Check that job before submitting another one.");
         generationOperationInProgress = true;
@@ -251,16 +298,10 @@ function createMcpServer(): McpServer {
         logger.info({ tool: "generate_video_and_wait", imageSource: image.source, fileId: image.fileId, steps: args.steps }, "MCP tool invoked");
         const submitted = await startVideo({ imageUrl: image.imageUrl, prompt: args.prompt, steps: args.steps, seed: args.seed });
         activeVideoJobs.add(submitted.job_id);
-        let completed;
-        try {
-          completed = await waitForVideo(submitted.job_id);
-        } finally {
-          activeVideoJobs.delete(submitted.job_id);
-        }
-        return textResult(`Video generated successfully: ${completed.video_url}`, {
+        return textResult(`Video job accepted. Job ID: ${submitted.job_id}. Poll check_video_job until it completes.`, {
           ok: true,
-          type: "video",
-          ...completed,
+          type: "video_job",
+          ...submitted,
         });
       } catch (error) {
         return errorResult(error);

@@ -3152,6 +3152,7 @@ if [[ "$MCP_ENABLED" == "true" ]]; then
       RUNPOD_PUBLIC_BASE_URL="$MCP_PUBLIC_GATEWAY_URL" \
       MCP_PUBLIC_BASE_URL="$MCP_PUBLIC_BASE_URL" \
       AUDIO_OUTPUT_DIR="$AUDIO_OUTPUT_DIR" \
+      VIDEO_JOB_DIR="$VIDEO_JOB_DIR" \
       node "$MCP_DIR/dist/server.js" \
       >>"$MCP_LOG" 2>&1 &
     echo $! >"$RUN_DIR/mcp-server.pid"

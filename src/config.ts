@@ -8,6 +8,7 @@ const envSchema = z.object({
   RUNPOD_PUBLIC_BASE_URL: z.string().url().transform((value) => value.replace(/\/$/, "")).optional(),
   MCP_PUBLIC_BASE_URL: z.string().url().transform((value) => value.replace(/\/$/, "")).optional(),
   AUDIO_OUTPUT_DIR: z.string().min(1).default("/workspace/generated/audio"),
+  VIDEO_JOB_DIR: z.string().min(1).default("/workspace/ai-stack/run/video-jobs"),
   RUNPOD_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   MODE_SWITCH_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
   MODE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
