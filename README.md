@@ -5,14 +5,14 @@ A local-first, production-style Model Context Protocol (MCP) server that exposes
 ## What it exposes
 
 - `get_runpod_status` — read-only health/status check.
-- `generate_image` — switches to image mode, waits for readiness, calls SDXL, returns an absolute PNG URL.
+- `generate_speech` — switches to TTS mode and returns playable Qwen3-TTS WAV audio.
 - `generate_video_from_image` — downloads an image URL, switches to video mode, submits a 5-second HunyuanVideo job, returns a job ID.
 - `check_video_job` — read-only job polling; returns `video_url` when completed.
 - `generate_video_and_wait` — convenience tool that submits and waits for the final MP4.
 
 ## Architecture
 
-ChatGPT -> HTTPS tunnel -> local MCP server -> RunPod port-8000 gateway -> SDXL/HunyuanVideo
+ChatGPT -> HTTPS -> RunPod gateway/MCP -> Qwen3-TTS or HunyuanVideo
 
 The MCP server runs locally. Your GPU workloads remain on RunPod.
 
@@ -102,12 +102,11 @@ npx @modelcontextprotocol/inspector@latest \
 Recommended test order:
 
 1. `get_runpod_status`
-2. `generate_image` with a simple prompt
-3. Copy `image_url` from the result
-4. `generate_video_from_image` with that URL and a motion prompt
-5. Copy `job_id`
-6. Repeatedly call `check_video_job` until `status` is `completed`
-7. Open `video_url`
+2. `generate_speech` with a short line of text
+3. `generate_video_from_image` with a public image URL and motion prompt
+4. Copy `job_id`
+5. Repeatedly call `check_video_job` until `status` is `completed`
+6. Open `video_url`
 
 You can also call `generate_video_and_wait`, but the asynchronous pair is easier to debug.
 
@@ -144,7 +143,7 @@ Use a Cloudflare tunnel that forwards HTTPS traffic to `http://localhost:8787`, 
 3. Go to **Settings -> Plugins** (or the developer-mode app management page).
 4. Create a new developer-mode app.
 5. Name: `RunPod AI Studio`.
-6. Description: `Generates SDXL images and 5-second HunyuanVideo clips using my RunPod GPU.`
+6. Description: `Generates Qwen3-TTS speech and 5-second HunyuanVideo clips using my RunPod GPU.`
 7. MCP URL: `https://YOUR_TUNNEL_HOST/mcp`.
 8. Create the app and verify the advertised tools appear.
 9. Start a new chat, add the app from the `+` / More menu, and test it.
@@ -230,7 +229,7 @@ The server should normally prevent this by polling. Set `LOG_LEVEL=debug` and in
 
 ### Video polling returns 503 after switching modes
 
-Your gateway only guarantees video job metadata while video mode remains active. Do not switch to image/TTS/LLM mode while a video job is running or before retrieving its completed job state.
+Your gateway only guarantees video job metadata while video mode remains active. Do not switch to TTS mode while a video job is running or before retrieving its completed job state.
 
 ### ChatGPT cannot connect
 

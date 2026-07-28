@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
-import { generateImage, getStatus, getVideoJob, health, startVideo, waitForVideo } from "./runpod.js";
+import { generateSpeech, getStatus, getVideoJob, health, startVideo, waitForVideo } from "./runpod.js";
 
 const MCP_PATH = "/mcp";
 const MCP_ALTERNATE_PATH = "/api/mcp";
@@ -32,10 +32,56 @@ function errorResult(error: unknown) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
-    { name: "runpod-ai-studio", version: "1.0.0" },
+    { name: "runpod-ai-studio", version: "1.1.0" },
     {
       instructions:
-        "Use get_runpod_status before diagnosing availability. generate_image creates an image and returns a public URL. generate_video_from_image submits a 5-second portrait video job from an image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",
+        "Use get_runpod_status before diagnosing availability. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a public image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",
+    },
+  );
+
+  server.registerTool(
+    "generate_speech",
+    {
+      title: "Generate speech with Qwen3-TTS",
+      description:
+        "Convert text to spoken WAV audio using Qwen3-TTS on RunPod. This automatically switches the single GPU into TTS mode and returns playable audio.",
+      inputSchema: {
+        text: z.string().min(1).max(1500).describe("Text to synthesize as speech."),
+        voice: z.string().min(1).max(100).default("Ryan").describe("Qwen3-TTS voice name, such as Ryan."),
+        speed: z.number().min(0.25).max(4).default(1).describe("Speech speed multiplier."),
+      },
+    },
+    async (args) => {
+      let acquiredGenerationLock = false;
+      try {
+        if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
+        if (activeVideoJobs.size > 0) {
+          throw new Error("Cannot switch to TTS mode while a video job is active. Check the video job until it completes or fails.");
+        }
+        generationOperationInProgress = true;
+        acquiredGenerationLock = true;
+        logger.info({ tool: "generate_speech", voice: args.voice, textLength: args.text.length }, "MCP tool invoked");
+        const result = await generateSpeech({ text: args.text, voice: args.voice, speed: args.speed });
+        const data = Buffer.from(result.bytes).toString("base64");
+        return {
+          content: [
+            { type: "text" as const, text: `Speech generated successfully with voice ${result.voice}.` },
+            { type: "audio" as const, data, mimeType: result.mimeType },
+          ],
+          structuredContent: {
+            ok: true,
+            type: "audio",
+            format: result.format,
+            mime_type: result.mimeType,
+            voice: result.voice,
+            byte_length: result.bytes.byteLength,
+          },
+        };
+      } catch (error) {
+        return errorResult(error);
+      } finally {
+        if (acquiredGenerationLock) generationOperationInProgress = false;
+      }
     },
   );
 
@@ -58,62 +104,13 @@ function createMcpServer(): McpServer {
   );
 
   server.registerTool(
-    "generate_image",
-    {
-      title: "Generate image on RunPod",
-      description:
-        "Generate one SDXL image from a text prompt. Use this when the user asks to create a starting image or standalone image. This tool automatically switches the single GPU into image mode and waits until ready.",
-      inputSchema: {
-        prompt: z.string().min(1).max(4000).describe("Detailed visual prompt for the generated image."),
-        width: z.number().int().min(256).max(1536).multipleOf(16).default(1024),
-        height: z.number().int().min(256).max(1536).multipleOf(16).default(1024),
-        steps: z.number().int().min(1).max(100).default(30),
-        guidance_scale: z.number().min(0).max(20).default(7),
-        seed: z.number().int().nonnegative().optional(),
-      },
-    },
-    async (args) => {
-      let acquiredGenerationLock = false;
-      try {
-        if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
-        if (activeVideoJobs.size > 0) {
-          throw new Error("Cannot switch to image mode while a video job is active. Check the video job until it completes or fails.");
-        }
-        generationOperationInProgress = true;
-        acquiredGenerationLock = true;
-        logger.info({ tool: "generate_image", width: args.width, height: args.height, steps: args.steps }, "MCP tool invoked");
-        const result = await generateImage({
-          prompt: args.prompt,
-          width: args.width,
-          height: args.height,
-          steps: args.steps,
-          guidanceScale: args.guidance_scale,
-          seed: args.seed,
-        });
-        return textResult(`Image generated successfully: ${result.image_url}`, {
-          ok: true,
-          type: "image",
-          image_url: result.image_url,
-          model: result.model,
-          created: result.created,
-          ...result.data[0],
-        });
-      } catch (error) {
-        return errorResult(error);
-      } finally {
-        if (acquiredGenerationLock) generationOperationInProgress = false;
-      }
-    },
-  );
-
-  server.registerTool(
     "generate_video_from_image",
     {
       title: "Generate 5-second video from image",
       description:
         "Submit a HunyuanVideo image-to-video job using a publicly reachable image URL. Use this for a 5-second 480x832 portrait clip. The tool switches the GPU into video mode and returns immediately with a job ID; call check_video_job afterward.",
       inputSchema: {
-        image_url: z.string().url().describe("Public image URL, commonly returned by generate_image."),
+        image_url: z.string().url().describe("Publicly reachable source image URL."),
         prompt: z.string().min(1).max(4000).describe("Motion/camera prompt describing how the input image should animate."),
         steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
         seed: z.number().int().nonnegative().optional(),

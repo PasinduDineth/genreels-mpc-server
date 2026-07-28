@@ -69,7 +69,7 @@ set -Eeuo pipefail
 #
 # ==============================================================================
 
-SCRIPT_VERSION="10.5.1"
+SCRIPT_VERSION="11.0.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 WORKSPACE="${WORKSPACE:-/workspace}"
@@ -115,7 +115,7 @@ TTS_PREFLIGHT="${TTS_PREFLIGHT:-true}"
 # Default SDXL model is public and ungated; no Hugging Face authentication token is required.
 IMAGE_MODEL="${IMAGE_MODEL:-stabilityai/stable-diffusion-xl-base-1.0}"
 IMAGE_PORT="${IMAGE_PORT:-8189}"
-IMAGE_PREFLIGHT="${IMAGE_PREFLIGHT:-true}"
+IMAGE_PREFLIGHT="false"
 IMAGE_DEFAULT_WIDTH="${IMAGE_DEFAULT_WIDTH:-1024}"
 IMAGE_DEFAULT_HEIGHT="${IMAGE_DEFAULT_HEIGHT:-1024}"
 IMAGE_DEFAULT_STEPS="${IMAGE_DEFAULT_STEPS:-30}"
@@ -246,6 +246,18 @@ run_logged "Installing base packages..." \
 
 command -v nvidia-smi >/dev/null 2>&1 \
   || fatal "nvidia-smi is unavailable. Start this script on an NVIDIA GPU pod."
+
+section "Removing retired LLM and SDXL services"
+kill_matching "ollama serve"
+kill_matching "llama-server"
+kill_matching "$IMAGE_DIR"
+rm -rf --one-file-system \
+  "$WORKSPACE/.ollama" \
+  "$IMAGE_DIR" \
+  "$GENERATED_DIR" \
+  /usr/lib/ollama \
+  /usr/local/lib/ollama
+log "Removed Ollama models/runtime and the SDXL service/output directories."
 
 GPU_NAME="$(
   nvidia-smi --query-gpu=name --format=csv,noheader \
@@ -608,6 +620,7 @@ fi
 # SDXL text-to-image service
 # ------------------------------------------------------------------------------
 
+if false; then
 section "SDXL text-to-image installation"
 log "SDXL Hugging Face cache: $HF_HOME"
 
@@ -831,6 +844,7 @@ import py_compile
 py_compile.compile(r"$IMAGE_DIR/app.py", cfile="/tmp/image-service-app.pyc", doraise=True)
 print("image-service app.py compile: OK")
 PY
+fi
 
 
 # ------------------------------------------------------------------------------
@@ -1616,7 +1630,7 @@ VIDEO_LOG = LOG_DIR / "video-service.log"
 
 APP = FastAPI(
     title="RunPod AI Gateway",
-    description="Mutually exclusive LLM/TTS GPU controller and proxy",
+    description="Single-GPU Qwen3-TTS and HunyuanVideo controller and proxy",
     version=str(CONFIG.get("version", "3")),
     docs_url="/gateway/docs",
     openapi_url="/gateway/openapi.json",
@@ -2248,18 +2262,8 @@ async def run_transition(
 
             if target == "off":
                 await switch_off(operation_id)
-            elif target == "llm":
-                await switch_llm(
-                    operation_id,
-                    model=model,
-                    context=context,
-                    keep_alive=keep_alive,
-                    warmup=warmup,
-                )
             elif target == "tts":
                 await switch_tts(operation_id)
-            elif target == "image":
-                await switch_image(operation_id)
             elif target == "video":
                 await switch_video(operation_id)
             else:
@@ -2417,7 +2421,6 @@ def gpu_status() -> dict[str, Any]:
 
 async def full_status() -> dict[str, Any]:
     state = read_state()
-    loaded = await ollama_models()
     tts_pid = read_pid(TTS_PID_FILE)
     memory = psutil.virtual_memory()
 
@@ -2433,28 +2436,10 @@ async def full_status() -> dict[str, Any]:
                 "state": "running",
                 "port": 8000,
             },
-            "ollama": {
-                "state": "running" if port_open(11434) else "stopped",
-                "port": 11434,
-                "daemon_processes": process_matches("ollama serve"),
-            },
-            "llm": {
-                "state": "loaded" if loaded else "unloaded",
-                "models": loaded,
-                "default_model": DEFAULT_MODEL,
-                "default_context": DEFAULT_CONTEXT,
-                "runner_processes": process_matches("llama-server"),
-            },
             "tts": {
                 "state": "running" if port_open(8880) else "stopped",
                 "port": 8880,
                 "pid": tts_pid if process_alive(tts_pid) else None,
-            },
-            "image": {
-                "state": "running" if port_open(IMAGE_PORT) else "stopped",
-                "port": IMAGE_PORT,
-                "pid": read_pid(IMAGE_PID_FILE) if process_alive(read_pid(IMAGE_PID_FILE)) else None,
-                "model": IMAGE_MODEL,
             },
             "video": {
                 "state": "running" if port_open(VIDEO_PORT) else "stopped",
@@ -2473,9 +2458,7 @@ async def full_status() -> dict[str, Any]:
         },
         "logs": {
             "gateway": str(LOG_DIR / "gateway.log"),
-            "ollama": str(OLLAMA_LOG),
             "tts": str(TTS_LOG),
-            "image": str(IMAGE_LOG),
             "video": str(VIDEO_LOG),
             "control": str(CONTROL_LOG),
             "startup": str(LOG_DIR / "startup.log"),
@@ -2990,6 +2973,25 @@ async def tts_native_proxy(path: str, request: Request):
         )
 
     return await generic_proxy(request, TTS_BASE, path)
+
+
+# The production surface intentionally contains only TTS, video, status,
+# health, resources, and MCP. Remove legacy Ollama/LLM and SDXL routes from
+# both request routing and generated OpenAPI documentation.
+_REMOVED_EXACT_PATHS = {
+    "/control/llm/start",
+    "/control/llm/stop",
+    "/control/image/start",
+    "/control/image/stop",
+    "/v1/images/generations",
+    "/files/generated/{filename}",
+}
+APP.router.routes = [
+    route
+    for route in APP.router.routes
+    if getattr(route, "path", "") not in _REMOVED_EXACT_PATHS
+    and not getattr(route, "path", "").startswith("/ollama/")
+]
 PY
 
 "$GATEWAY_VENV/bin/python" - <<PY
@@ -3038,22 +3040,15 @@ def pretty(value):
 
 
 if len(sys.argv) < 2:
-    print("Usage: ai-mode status|llm|tts|image|video|off|restart")
+    print("Usage: ai-mode status|tts|video|off|restart")
     raise SystemExit(2)
 
 command = sys.argv[1].lower()
 
 if command == "status":
     pretty(request("GET", "/control/status"))
-elif command == "llm":
-    payload = {"warmup": True}
-    if len(sys.argv) >= 3:
-        payload["context"] = int(sys.argv[2])
-    pretty(request("POST", "/control/llm/start", payload))
 elif command == "tts":
     pretty(request("POST", "/control/tts/start", {}))
-elif command == "image":
-    pretty(request("POST", "/control/image/start", {}))
 elif command == "video":
     pretty(request("POST", "/control/video/start", {}))
 elif command == "off":
@@ -3490,29 +3485,12 @@ case "$AI_START_MODE" in
   off)
     log "Initial mode requested: off"
     ;;
-  llm)
-    if [[ "$LLM_ENABLED" != "true" ]]; then
-      fatal "AI_START_MODE=llm cannot be used while LLM_ENABLED=false."
-    fi
-    log "Initial mode requested: llm"
-    curl -fsS -X POST \
-      -H 'Content-Type: application/json' \
-      -d '{"warmup":true}' \
-      http://127.0.0.1:8000/control/llm/start >/dev/null
-    ;;
   tts)
     log "Initial mode requested: tts"
     curl -fsS -X POST \
       -H 'Content-Type: application/json' \
       -d '{}' \
       http://127.0.0.1:8000/control/tts/start >/dev/null
-    ;;
-  image)
-    log "Initial mode requested: image"
-    curl -fsS -X POST \
-      -H 'Content-Type: application/json' \
-      -d '{}' \
-      http://127.0.0.1:8000/control/image/start >/dev/null
     ;;
   video)
     log "Initial mode requested: video"
@@ -3522,7 +3500,7 @@ case "$AI_START_MODE" in
       http://127.0.0.1:8000/control/video/start >/dev/null
     ;;
   *)
-    fatal "AI_START_MODE must be one of: off, llm, tts, image, video"
+    fatal "AI_START_MODE must be one of: off, tts, video"
     ;;
 esac
 
@@ -3533,14 +3511,8 @@ log "Gateway local URL: http://127.0.0.1:8000"
 log "Swagger: /gateway/docs"
 log "Health: /health"
 log "Status: /control/status"
-log "LLM enabled: $LLM_ENABLED"
-if [[ "$LLM_ENABLED" == "true" ]]; then
-  log "Default model: $OLLAMA_MODEL"
-  log "Default context: $DEFAULT_CONTEXT"
-fi
 log "Initial mode: $AI_START_MODE"
 log "TTS preflight: $TTS_PREFLIGHT"
-log "Image preflight: $IMAGE_PREFLIGHT"
 log "Video preflight: $VIDEO_PREFLIGHT"
 log "MCP deployment: $MCP_ENABLED"
 
@@ -3563,23 +3535,11 @@ RunPod AI Stack is ready
 Local status:
   curl http://127.0.0.1:8000/control/status
 
-Start LLM:
-  curl -X POST \
-    -H "Content-Type: application/json" \
-    -d '{"warmup":true}' \
-    http://127.0.0.1:8000/control/llm/start
-
 Start TTS:
   curl -X POST \
     -H "Content-Type: application/json" \
     -d '{}' \
     http://127.0.0.1:8000/control/tts/start
-
-Start image mode:
-  curl -X POST http://127.0.0.1:8000/control/image/start
-
-Generate one image:
-  curl -X POST     -H "Content-Type: application/json"     -d '{"prompt":"A futuristic city at sunset","width":1024,"height":1024}'     http://127.0.0.1:8000/v1/images/generations
 
 Start video mode:
   curl -X POST http://127.0.0.1:8000/control/video/start
@@ -3595,10 +3555,7 @@ Stop all GPU workloads:
 
 CLI:
   ai-mode status
-  ai-mode llm
-  ai-mode llm 4096
   ai-mode tts
-  ai-mode image
   ai-mode video
   ai-mode off
   ai-mode restart
@@ -3606,8 +3563,7 @@ CLI:
 Storage:
   Workspace:      /workspace                         (code, logs, small runtime files)
   Shared HF:      "$HF_HOME"
-  Ollama models:  "$OLLAMA_MODELS"
-  Wan model:      "$VIDEO_HF_HOME"
+  Video model:    "$VIDEO_HF_HOME"
   Video venv:     "$VIDEO_VENV"
 
 Logs:
@@ -3616,9 +3572,7 @@ Logs:
   Install:    $INSTALL_LOG
   Preflight:  $PREFLIGHT_LOG
   Gateway:    $GATEWAY_LOG
-  Ollama:     $OLLAMA_LOG
   TTS:        $TTS_LOG
-  Image:      $IMAGE_LOG
   Video:      $VIDEO_LOG
   MCP:        $MCP_LOG
   Video backend: HunyuanVideo-1.5 480p I2V Step-Distilled (public, async)

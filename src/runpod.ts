@@ -3,7 +3,7 @@ import { logger } from "./logger.js";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
-export type Mode = "off" | "llm" | "tts" | "image" | "video";
+export type Mode = "off" | "tts" | "video";
 
 export type ControlStatus = {
   active_mode?: string;
@@ -13,18 +13,6 @@ export type ControlStatus = {
   stage?: string;
   last_error?: string | null;
   [key: string]: unknown;
-};
-
-export type ImageGenerationResult = {
-  created: number;
-  model: string;
-  data: Array<{
-    url: string;
-    width: number;
-    height: number;
-    seed: number;
-    generation_seconds: number;
-  }>;
 };
 
 export type VideoStartResult = {
@@ -50,6 +38,13 @@ export type VideoJobResult = {
   fps?: number;
   seed?: number;
   [key: string]: unknown;
+};
+
+export type SpeechGenerationResult = {
+  bytes: Uint8Array;
+  mimeType: string;
+  format: "wav";
+  voice: string;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -203,40 +198,50 @@ export async function ensureMode(mode: Exclude<Mode, "off">): Promise<ControlSta
   throw new Error(`Timed out waiting for GPU mode '${mode}' after ${config.MODE_SWITCH_TIMEOUT_MS} ms`);
 }
 
-export async function generateImage(input: {
-  prompt: string;
-  width?: number;
-  height?: number;
-  steps?: number;
-  guidanceScale?: number;
-  seed?: number;
-}): Promise<ImageGenerationResult & { image_url: string }> {
-  await ensureMode("image");
+export async function generateSpeech(input: {
+  text: string;
+  voice?: string;
+  speed?: number;
+}): Promise<SpeechGenerationResult> {
+  await ensureMode("tts");
 
+  const voice = input.voice?.trim() || "Ryan";
   const response = await request(
-    "/v1/images/generations",
+    "/v1/audio/speech",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        prompt: input.prompt,
-        width: input.width ?? 1024,
-        height: input.height ?? 1024,
-        steps: input.steps ?? 30,
-        guidance_scale: input.guidanceScale ?? 7.0,
-        ...(input.seed === undefined ? {} : { seed: input.seed }),
+        model: "tts-1",
+        voice,
+        input: input.text,
+        response_format: "wav",
+        speed: input.speed ?? 1,
       }),
     },
     config.MODE_SWITCH_TIMEOUT_MS,
   );
 
-  const result = await jsonOrThrow<ImageGenerationResult>(response, "Image generation");
-  const item = result.data?.[0];
-  if (!item?.url) throw new Error("Image generation succeeded but response contained no data[0].url");
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Speech generation failed (${response.status}): ${body}`);
+  }
 
-  const imageUrl = publicAbsoluteUrl(item.url);
-  logger.info({ imageUrl, seed: item.seed, generationSeconds: item.generation_seconds }, "Image generated");
-  return { ...result, image_url: imageUrl };
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0] || "audio/wav";
+  if (!contentType.startsWith("audio/") && contentType !== "application/octet-stream") {
+    throw new Error(`Speech generation returned an unexpected content type: ${contentType}`);
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength === 0) throw new Error("Speech generation returned an empty audio file");
+
+  logger.info({ voice, byteLength: bytes.byteLength, contentType }, "Speech generated");
+  return {
+    bytes,
+    mimeType: contentType === "application/octet-stream" ? "audio/wav" : contentType,
+    format: "wav",
+    voice,
+  };
 }
 
 async function fetchImageBytes(imageUrl: string): Promise<{ bytes: Uint8Array; contentType: string; filename: string }> {
