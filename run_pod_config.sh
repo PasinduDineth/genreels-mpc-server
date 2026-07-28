@@ -69,7 +69,7 @@ set -Eeuo pipefail
 #
 # ==============================================================================
 
-SCRIPT_VERSION="11.0.0"
+SCRIPT_VERSION="11.0.1"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 WORKSPACE="${WORKSPACE:-/workspace}"
@@ -3173,7 +3173,27 @@ curl -fsS -X POST \
   -d '{}' \
   http://127.0.0.1:8000/control/off >/dev/null 2>&1 || true
 
-sleep 2
+OFF_DEADLINE=$(( $(date +%s) + 300 ))
+while true; do
+  STATUS_JSON="$(curl -fsS http://127.0.0.1:8000/control/status)"
+  STAGE="$(printf '%s' "$STATUS_JSON" | jq -r '.stage // "unknown"')"
+  MODE="$(printf '%s' "$STATUS_JSON" | jq -r '.actual_mode // .active_mode // "unknown"')"
+  TRANSITIONING="$(printf '%s' "$STATUS_JSON" | jq -r '.transitioning // false')"
+  ERROR_TEXT="$(printf '%s' "$STATUS_JSON" | jq -r '.last_error // empty')"
+
+  if [[ "$STAGE" == "failed" ]]; then
+    printf '%s\n' "$STATUS_JSON" >>"$PREFLIGHT_LOG"
+    fatal "Could not establish the initial clean GPU state: ${ERROR_TEXT:-unknown error}"
+  fi
+
+  [[ "$MODE" == "off" && "$TRANSITIONING" == "false" ]] && break
+
+  if (( $(date +%s) >= OFF_DEADLINE )); then
+    printf '%s\n' "$STATUS_JSON" >>"$PREFLIGHT_LOG"
+    fatal "GPU did not reach the initial clean off state within 300 seconds."
+  fi
+  sleep 2
+done
 
 if [[ "$TTS_PREFLIGHT" == "true" ]]; then
   section "TTS functional preflight"
