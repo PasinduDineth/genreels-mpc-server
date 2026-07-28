@@ -6,7 +6,7 @@ A local-first, production-style Model Context Protocol (MCP) server that exposes
 
 - `get_runpod_status` — read-only health/status check.
 - `generate_speech` — switches to TTS mode, saves a WAV, and returns a public downloadable audio URL.
-- `generate_video_from_image` — downloads an image URL, switches to video mode, submits a 5-second HunyuanVideo job, returns a job ID.
+- `generate_video_from_image` — accepts a ChatGPT-generated/uploaded image or downloads a public image URL, switches to video mode, submits a 5-second HunyuanVideo job, and returns a job ID.
 - `check_video_job` — read-only job polling; returns `video_url` when completed.
 - `generate_video_and_wait` — convenience tool that submits and waits for the final MP4.
 
@@ -103,7 +103,7 @@ Recommended test order:
 
 1. `get_runpod_status`
 2. `generate_speech` with a short line of text
-3. `generate_video_from_image` with a public image URL and motion prompt
+3. `generate_video_from_image` with the generated/uploaded ChatGPT image (preferred) or a public image URL, plus a motion prompt
 4. Copy `job_id`
 5. Repeatedly call `check_video_job` until `status` is `completed`
 6. Open `video_url`

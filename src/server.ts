@@ -16,6 +16,35 @@ const MCP_POST_PATHS = new Set(["/", MCP_PATH, MCP_ALTERNATE_PATH, MCP_CONNECTOR
 const activeVideoJobs = new Set<string>();
 let generationOperationInProgress = false;
 
+type OpenAiFileParam = {
+  download_url?: string;
+  file_id?: string;
+  mime_type?: string;
+  file_name?: string;
+};
+
+function getVideoImageUrl(args: { image_url?: string; image_file?: unknown }): {
+  imageUrl: string;
+  source: "url" | "chatgpt_file";
+  fileId?: string;
+} {
+  if (args.image_file !== undefined && args.image_file !== null) {
+    if (typeof args.image_file !== "object" || Array.isArray(args.image_file)) {
+      throw new Error("ChatGPT did not provide a usable image file reference. Reattach the image and try again.");
+    }
+    const file = args.image_file as OpenAiFileParam;
+    if (!file.download_url || !URL.canParse(file.download_url)) {
+      throw new Error("The image file reference does not contain a valid temporary download URL. Reattach the image and try again.");
+    }
+    if (file.mime_type && !file.mime_type.toLowerCase().startsWith("image/")) {
+      throw new Error(`The attached file is not an image (${file.mime_type}).`);
+    }
+    return { imageUrl: file.download_url, source: "chatgpt_file", ...(file.file_id ? { fileId: file.file_id } : {}) };
+  }
+  if (args.image_url) return { imageUrl: args.image_url, source: "url" };
+  throw new Error("Provide either image_file (a ChatGPT-generated/uploaded image) or image_url (a public HTTPS image URL).");
+}
+
 function textResult(message: string, structuredContent: Record<string, unknown>) {
   return {
     content: [{ type: "text" as const, text: message }],
@@ -35,10 +64,10 @@ function errorResult(error: unknown) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
-    { name: "runpod-ai-studio", version: "1.2.0" },
+    { name: "runpod-ai-studio", version: "1.3.0" },
     {
       instructions:
-        "Use get_runpod_status before diagnosing availability. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a public image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",
+        "Use get_runpod_status before diagnosing availability. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",
     },
   );
 
@@ -117,12 +146,16 @@ function createMcpServer(): McpServer {
     {
       title: "Generate 5-second video from image",
       description:
-        "Submit a HunyuanVideo image-to-video job using a publicly reachable image URL. Use this for a 5-second 480x832 portrait clip. The tool switches the GPU into video mode and returns immediately with a job ID; call check_video_job afterward.",
+        "Submit a HunyuanVideo image-to-video job using a ChatGPT-generated/uploaded image or a publicly reachable image URL. Prefer image_file for an image created or attached in this chat. Use this for a 5-second 480x832 portrait clip. The tool switches the GPU into video mode and returns immediately with a job ID; call check_video_job afterward.",
       inputSchema: {
-        image_url: z.string().url().describe("Publicly reachable source image URL."),
+        image_file: z.any().optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation."),
+        image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
         prompt: z.string().min(1).max(4000).describe("Motion/camera prompt describing how the input image should animate."),
         steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
         seed: z.number().int().nonnegative().optional(),
+      },
+      _meta: {
+        "openai/fileParams": ["image_file"],
       },
     },
     async (args) => {
@@ -132,8 +165,9 @@ function createMcpServer(): McpServer {
         if (activeVideoJobs.size > 0) throw new Error("A video job is already active. Check that job before submitting another one.");
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
-        logger.info({ tool: "generate_video_from_image", imageUrl: args.image_url, steps: args.steps }, "MCP tool invoked");
-        const result = await startVideo({ imageUrl: args.image_url, prompt: args.prompt, steps: args.steps, seed: args.seed });
+        const image = getVideoImageUrl(args);
+        logger.info({ tool: "generate_video_from_image", imageSource: image.source, fileId: image.fileId, steps: args.steps }, "MCP tool invoked");
+        const result = await startVideo({ imageUrl: image.imageUrl, prompt: args.prompt, steps: args.steps, seed: args.seed });
         activeVideoJobs.add(result.job_id);
         return textResult(`Video job accepted. Job ID: ${result.job_id}`, {
           ok: true,
@@ -181,12 +215,16 @@ function createMcpServer(): McpServer {
     {
       title: "Generate 5-second video and wait",
       description:
-        "Generate a 5-second HunyuanVideo clip from an image URL and wait until the MP4 is complete. Use only when the user explicitly wants a finished clip in one operation; this can take several minutes.",
+        "Generate a 5-second HunyuanVideo clip from a ChatGPT-generated/uploaded image or public image URL and wait until the MP4 is complete. Prefer image_file for an image created or attached in this chat. Use only when the user explicitly wants a finished clip in one operation; this can take several minutes.",
       inputSchema: {
-        image_url: z.string().url(),
+        image_file: z.any().optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation."),
+        image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
         prompt: z.string().min(1).max(4000),
         steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
         seed: z.number().int().nonnegative().optional(),
+      },
+      _meta: {
+        "openai/fileParams": ["image_file"],
       },
     },
     async (args) => {
@@ -196,8 +234,9 @@ function createMcpServer(): McpServer {
         if (activeVideoJobs.size > 0) throw new Error("A video job is already active. Check that job before submitting another one.");
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
-        logger.info({ tool: "generate_video_and_wait", imageUrl: args.image_url, steps: args.steps }, "MCP tool invoked");
-        const submitted = await startVideo({ imageUrl: args.image_url, prompt: args.prompt, steps: args.steps, seed: args.seed });
+        const image = getVideoImageUrl(args);
+        logger.info({ tool: "generate_video_and_wait", imageSource: image.source, fileId: image.fileId, steps: args.steps }, "MCP tool invoked");
+        const submitted = await startVideo({ imageUrl: image.imageUrl, prompt: args.prompt, steps: args.steps, seed: args.seed });
         activeVideoJobs.add(submitted.job_id);
         let completed;
         try {
