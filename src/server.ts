@@ -23,14 +23,27 @@ type OpenAiFileParam = {
   file_name?: string;
 };
 
+const openAiImageFileSchema = z.union([
+  z.object({
+    download_url: z.string().url().describe("Temporary HTTPS download URL supplied by ChatGPT."),
+    file_id: z.string().optional().describe("Stable ChatGPT file identifier."),
+    mime_type: z.string().optional().describe("Image MIME type."),
+    file_name: z.string().optional().describe("Original image filename."),
+  }).passthrough(),
+  z.string().describe("ChatGPT platform file reference; the client replaces this with a downloadable file object."),
+]).optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation.");
+
 function getVideoImageUrl(args: { image_url?: string; image_file?: unknown }): {
   imageUrl: string;
   source: "url" | "chatgpt_file";
   fileId?: string;
 } {
   if (args.image_file !== undefined && args.image_file !== null) {
+    if (typeof args.image_file === "string") {
+      throw new Error("ChatGPT passed an unresolved local file reference instead of a downloadable file object. Refresh or recreate the connector, reattach the image, and try again.");
+    }
     if (typeof args.image_file !== "object" || Array.isArray(args.image_file)) {
-      throw new Error("ChatGPT did not provide a usable image file reference. Reattach the image and try again.");
+      throw new Error("ChatGPT did not provide a usable image file reference. Refresh or recreate the connector, reattach the image, and try again.");
     }
     const file = args.image_file as OpenAiFileParam;
     if (!file.download_url || !URL.canParse(file.download_url)) {
@@ -64,7 +77,7 @@ function errorResult(error: unknown) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
-    { name: "runpod-ai-studio", version: "1.3.1" },
+    { name: "runpod-ai-studio", version: "1.4.0" },
     {
       instructions:
         "Use get_runpod_status before diagnosing availability. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",
@@ -148,7 +161,7 @@ function createMcpServer(): McpServer {
       description:
         "Submit a HunyuanVideo image-to-video job using a ChatGPT-generated/uploaded image or a publicly reachable image URL. Prefer image_file for an image created or attached in this chat. Use this for a 5-second 480x832 portrait clip. The tool switches the GPU into video mode and returns immediately with a job ID; call check_video_job afterward.",
       inputSchema: {
-        image_file: z.any().optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation."),
+        image_file: openAiImageFileSchema,
         image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
         prompt: z.string().min(1).max(4000).describe("Motion/camera prompt describing how the input image should animate."),
         steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
@@ -217,7 +230,7 @@ function createMcpServer(): McpServer {
       description:
         "Generate a 5-second HunyuanVideo clip from a ChatGPT-generated/uploaded image or public image URL and wait until the MP4 is complete. Prefer image_file for an image created or attached in this chat. Use only when the user explicitly wants a finished clip in one operation; this can take several minutes.",
       inputSchema: {
-        image_file: z.any().optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation."),
+        image_file: openAiImageFileSchema,
         image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
         prompt: z.string().min(1).max(4000),
         steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
