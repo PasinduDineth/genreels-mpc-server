@@ -2,6 +2,8 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 export type Mode = "off" | "tts" | "video";
 
@@ -45,6 +47,7 @@ export type SpeechGenerationResult = {
   mimeType: string;
   format: "wav";
   voice: string;
+  audioUrl?: string;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -235,12 +238,21 @@ export async function generateSpeech(input: {
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength === 0) throw new Error("Speech generation returned an empty audio file");
 
-  logger.info({ voice, byteLength: bytes.byteLength, contentType }, "Speech generated");
+  await mkdir(config.AUDIO_OUTPUT_DIR, { recursive: true });
+  const filename = `${Date.now()}-${crypto.randomUUID()}.wav`;
+  const outputPath = path.join(config.AUDIO_OUTPUT_DIR, filename);
+  await writeFile(outputPath, bytes);
+  const audioUrl = config.MCP_PUBLIC_BASE_URL
+    ? `${config.MCP_PUBLIC_BASE_URL}/files/generated/audio/${encodeURIComponent(filename)}`
+    : undefined;
+
+  logger.info({ voice, byteLength: bytes.byteLength, contentType, outputPath, audioUrl }, "Speech generated");
   return {
     bytes,
     mimeType: contentType === "application/octet-stream" ? "audio/wav" : contentType,
     format: "wav",
     voice,
+    audioUrl,
   };
 }
 

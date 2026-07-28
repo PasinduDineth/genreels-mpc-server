@@ -5,7 +5,7 @@ A local-first, production-style Model Context Protocol (MCP) server that exposes
 ## What it exposes
 
 - `get_runpod_status` — read-only health/status check.
-- `generate_speech` — switches to TTS mode and returns playable Qwen3-TTS WAV audio.
+- `generate_speech` — switches to TTS mode, saves a WAV, and returns a public downloadable audio URL.
 - `generate_video_from_image` — downloads an image URL, switches to video mode, submits a 5-second HunyuanVideo job, returns a job ID.
 - `check_video_job` — read-only job polling; returns `video_url` when completed.
 - `generate_video_and_wait` — convenience tool that submits and waits for the final MP4.

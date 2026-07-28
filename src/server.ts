@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -32,7 +35,7 @@ function errorResult(error: unknown) {
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
-    { name: "runpod-ai-studio", version: "1.1.0" },
+    { name: "runpod-ai-studio", version: "1.2.0" },
     {
       instructions:
         "Use get_runpod_status before diagnosing availability. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a public image URL. check_video_job is read-only. generate_video_and_wait may take several minutes; use it only when the user explicitly wants the final result in one tool call.",
@@ -65,7 +68,12 @@ function createMcpServer(): McpServer {
         const data = Buffer.from(result.bytes).toString("base64");
         return {
           content: [
-            { type: "text" as const, text: `Speech generated successfully with voice ${result.voice}.` },
+            {
+              type: "text" as const,
+              text: result.audioUrl
+                ? `Speech generated successfully with voice ${result.voice}: ${result.audioUrl}`
+                : `Speech generated successfully with voice ${result.voice}.`,
+            },
             { type: "audio" as const, data, mimeType: result.mimeType },
           ],
           structuredContent: {
@@ -75,6 +83,7 @@ function createMcpServer(): McpServer {
             mime_type: result.mimeType,
             voice: result.voice,
             byte_length: result.bytes.byteLength,
+            ...(result.audioUrl ? { audio_url: result.audioUrl } : {}),
           },
         };
       } catch (error) {
@@ -253,6 +262,27 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       const message = error instanceof Error ? error.message : String(error);
       res.writeHead(503, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "degraded", error: message }));
+    }
+    return;
+  }
+
+  const audioPrefix = "/files/generated/audio/";
+  if (req.method === "GET" && url.pathname.startsWith(audioPrefix)) {
+    const filename = path.basename(decodeURIComponent(url.pathname.slice(audioPrefix.length)));
+    const filePath = path.join(config.AUDIO_OUTPUT_DIR, filename);
+    try {
+      const info = await stat(filePath);
+      if (!info.isFile() || path.extname(filename).toLowerCase() !== ".wav") throw new Error("Not a WAV file");
+      res.writeHead(200, {
+        "content-type": "audio/wav",
+        "content-length": info.size,
+        "content-disposition": `inline; filename="${filename}"`,
+        "cache-control": "public, max-age=31536000, immutable",
+      });
+      createReadStream(filePath).pipe(res);
+    } catch {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: "Generated audio not found." }));
     }
     return;
   }

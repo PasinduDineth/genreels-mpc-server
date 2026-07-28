@@ -6,6 +6,8 @@ const envSchema = z.object({
   LOG_LEVEL: z.string().default("info"),
   RUNPOD_BASE_URL: z.string().url().transform((value) => value.replace(/\/$/, "")),
   RUNPOD_PUBLIC_BASE_URL: z.string().url().transform((value) => value.replace(/\/$/, "")).optional(),
+  MCP_PUBLIC_BASE_URL: z.string().url().transform((value) => value.replace(/\/$/, "")).optional(),
+  AUDIO_OUTPUT_DIR: z.string().min(1).default("/workspace/generated/audio"),
   RUNPOD_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   MODE_SWITCH_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
   MODE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),

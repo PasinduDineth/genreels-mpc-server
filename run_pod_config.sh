@@ -141,6 +141,8 @@ MCP_BRANCH="${MCP_BRANCH:-main}"
 MCP_PORT="${MCP_PORT:-8787}"
 MCP_DIR="${MCP_DIR:-$SCRIPT_DIR}"
 MCP_PUBLIC_GATEWAY_URL="${MCP_PUBLIC_GATEWAY_URL:-}"
+MCP_PUBLIC_BASE_URL="${MCP_PUBLIC_BASE_URL:-}"
+AUDIO_OUTPUT_DIR="${AUDIO_OUTPUT_DIR:-$WORKSPACE/generated/audio}"
 
 # Heavy model/cache data must never live on the 50 GB /workspace volume.
 OLLAMA_MODELS_DEFAULT="$WORKSPACE/.ollama/models"
@@ -3132,6 +3134,12 @@ if [[ "$MCP_ENABLED" == "true" ]]; then
     if [[ -z "$MCP_PUBLIC_GATEWAY_URL" ]]; then
       fatal "Set MCP_PUBLIC_GATEWAY_URL because RUNPOD_POD_ID is unavailable."
     fi
+    if [[ -z "$MCP_PUBLIC_BASE_URL" && -n "${RUNPOD_POD_ID:-}" ]]; then
+      MCP_PUBLIC_BASE_URL="https://${RUNPOD_POD_ID}-${MCP_PORT}.proxy.runpod.net"
+    fi
+    if [[ -z "$MCP_PUBLIC_BASE_URL" ]]; then
+      fatal "Set MCP_PUBLIC_BASE_URL because RUNPOD_POD_ID is unavailable."
+    fi
 
     kill_matching "$MCP_DIR/dist/server.js"
     sleep 1
@@ -3142,6 +3150,8 @@ if [[ "$MCP_ENABLED" == "true" ]]; then
       PORT="$MCP_PORT" \
       RUNPOD_BASE_URL="http://127.0.0.1:8000" \
       RUNPOD_PUBLIC_BASE_URL="$MCP_PUBLIC_GATEWAY_URL" \
+      MCP_PUBLIC_BASE_URL="$MCP_PUBLIC_BASE_URL" \
+      AUDIO_OUTPUT_DIR="$AUDIO_OUTPUT_DIR" \
       node "$MCP_DIR/dist/server.js" \
       >>"$MCP_LOG" 2>&1 &
     echo $! >"$RUN_DIR/mcp-server.pid"
