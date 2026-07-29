@@ -116,6 +116,8 @@ Video tools accept `num_frames` and `fps`. Frame counts must follow `4n + 1`:
 - Balanced 5 seconds: `num_frames: 81`, `fps: 16`
 - Quality 5 seconds: `num_frames: 121`, `fps: 24`
 
+The video backend accepts 25–121 frames (following `4n + 1`) and 8–24 FPS; duration is determined by the selected frame count and FPS.
+
 The persistent HunyuanVideo pipeline remains loaded after a job completes. It unloads only when switching to TTS/off mode or restarting the video service.
 
 ## 4. Connect the local server to ChatGPT

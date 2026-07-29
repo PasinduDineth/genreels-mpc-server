@@ -69,7 +69,7 @@ set -Eeuo pipefail
 #
 # ==============================================================================
 
-SCRIPT_VERSION="11.0.1"
+SCRIPT_VERSION="11.0.2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 WORKSPACE="${WORKSPACE:-/workspace}"
@@ -1348,15 +1348,15 @@ async def generate(
             status_code=422,
             detail=f"Fast portrait preset requires {DEFAULT_WIDTH}x{DEFAULT_HEIGHT}.",
         )
-    if num_frames != DEFAULT_FRAMES:
+    if num_frames < 25 or num_frames > 121 or (num_frames - 1) % 4 != 0:
         raise HTTPException(
             status_code=422,
-            detail=f"5-second preset requires {DEFAULT_FRAMES} frames.",
+            detail="num_frames must be between 25 and 121 and follow 4n + 1.",
         )
-    if fps != DEFAULT_FPS:
+    if fps < 8 or fps > 24:
         raise HTTPException(
             status_code=422,
-            detail=f"Preset uses {DEFAULT_FPS} fps.",
+            detail="fps must be between 8 and 24.",
         )
     if steps not in {4, 8, 12}:
         raise HTTPException(
