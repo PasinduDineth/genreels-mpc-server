@@ -111,6 +111,7 @@ TTS_MODEL_NAME="${TTS_MODEL_NAME:-Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice}"
 TTS_BACKEND="${TTS_BACKEND:-official}"
 TTS_LAZY_LOAD="${TTS_LAZY_LOAD:-true}"
 TTS_PREFLIGHT="${TTS_PREFLIGHT:-true}"
+TTS_AUTOCHUNK="${TTS_AUTOCHUNK:-false}"
 # Default SDXL model is public/ungated: no Hugging Face auth token required.
 # Default SDXL model is public and ungated; no Hugging Face authentication token is required.
 IMAGE_MODEL="${IMAGE_MODEL:-stabilityai/stable-diffusion-xl-base-1.0}"
@@ -1861,6 +1862,7 @@ def start_tts_sync() -> int:
             "TTS_BACKEND": str(CONFIG["tts_backend"]),
             "TTS_MODEL_NAME": str(CONFIG["tts_model_name"]),
             "TTS_LAZY_LOAD": str(CONFIG["tts_lazy_load"]).lower(),
+            "TTS_AUTOCHUNK": str(TTS_AUTOCHUNK).lower(),
         }
     )
 
