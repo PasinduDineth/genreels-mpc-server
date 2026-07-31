@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+﻿import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -8,6 +8,7 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { generateSpeech, getStatus, getVideoJob, health, startVideo } from "./runpod.js";
+import { getComposeJob, submitComposeJob } from "./remotion.js";
 
 const MCP_PATH = "/mcp";
 const MCP_ALTERNATE_PATH = "/api/mcp";
@@ -128,7 +129,7 @@ function createMcpServer(): McpServer {
     { name: "runpod-ai-studio", version: "1.6.0" },
     {
       instructions:
-        "Use get_runpod_status before diagnosing availability or to recover active video job IDs. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL and immediately returns a job ID. Poll check_video_job with that ID until completion. generate_video_and_wait is a backward-compatible asynchronous alias and also returns immediately; no video tool waits inside one MCP request.",
+        "Use get_runpod_status before diagnosing availability or to recover active video job IDs. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL and immediately returns a job ID. Poll check_video_job with that ID until completion. generate_video_and_wait is a backward-compatible asynchronous alias and also returns immediately; no video tool waits inside one MCP request. compose_video_story assembles clips, narration, and music into a 9:16 Remotion render and returns a job ID immediately.",
     },
   );
 
@@ -368,6 +369,67 @@ function createMcpServer(): McpServer {
     },
   );
 
+  server.registerTool(
+    "compose_video_story",
+    {
+      title: "Compose 9:16 narrative short",
+      description:
+        "Assemble multiple generated clips, optional narration, and optional music into a single 9:16 TikTok-style MP4 using Remotion. The tool returns immediately with a job ID; poll check_compose_job for the final video_url.",
+      inputSchema: {
+        title: z.string().max(120).optional(),
+        subtitle: z.string().max(240).optional(),
+        narration_url: z.string().url().optional(),
+        music_url: z.string().url().optional(),
+        segments: z.array(z.object({
+          src: z.string().url(),
+          duration_seconds: z.number().positive().max(30),
+          kind: z.union([z.literal("video"), z.literal("image")]),
+          caption: z.string().max(140).optional(),
+        })).min(1).max(30),
+      },
+    },
+    async (args) => {
+      try {
+        logger.info({ tool: "compose_video_story", segmentCount: args.segments.length, hasNarration: Boolean(args.narration_url), hasMusic: Boolean(args.music_url) }, "MCP tool invoked");
+        const result = await submitComposeJob({
+          title: args.title,
+          subtitle: args.subtitle,
+          narrationUrl: args.narration_url,
+          musicUrl: args.music_url,
+          segments: args.segments.map((segment) => ({
+            src: segment.src,
+            durationSeconds: segment.duration_seconds,
+            kind: segment.kind,
+            caption: segment.caption,
+          })),
+        });
+        return textResult(`Compose job accepted. Job ID: ${result.jobId}`, { ok: true, type: "compose_job", ...result });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "check_compose_job",
+    {
+      title: "Check Remotion compose job",
+      description: "Read-only. Check a previously submitted compose job and return the final MP4 URL when complete.",
+      inputSchema: { job_id: z.string().regex(/^[0-9a-f]{32}$/) },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ job_id }) => {
+      try {
+        const result = await getComposeJob(job_id);
+        if (!result) throw new Error(`Unknown compose job: ${job_id}`);
+        const message = result.status === "completed" ? `Compose completed: ${result.videoUrl}` : result.status === "failed" ? `Compose failed: ${result.error ?? "unknown error"}` : `Compose is ${result.status}.`;
+        return textResult(message, { ok: result.status !== "failed", type: "compose_job", ...result });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+    );
+
   return server;
 }
 
@@ -412,27 +474,6 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       const message = error instanceof Error ? error.message : String(error);
       res.writeHead(503, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "degraded", error: message }));
-    }
-    return;
-  }
-
-  const audioPrefix = "/files/generated/audio/";
-  if (req.method === "GET" && url.pathname.startsWith(audioPrefix)) {
-    const filename = path.basename(decodeURIComponent(url.pathname.slice(audioPrefix.length)));
-    const filePath = path.join(config.AUDIO_OUTPUT_DIR, filename);
-    try {
-      const info = await stat(filePath);
-      if (!info.isFile() || path.extname(filename).toLowerCase() !== ".wav") throw new Error("Not a WAV file");
-      res.writeHead(200, {
-        "content-type": "audio/wav",
-        "content-length": info.size,
-        "content-disposition": `inline; filename="${filename}"`,
-        "cache-control": "public, max-age=31536000, immutable",
-      });
-      createReadStream(filePath).pipe(res);
-    } catch {
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ detail: "Generated audio not found." }));
     }
     return;
   }
@@ -494,3 +535,10 @@ const shutdown = (signal: string) => {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+
+
+
+
+
+

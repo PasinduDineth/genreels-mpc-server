@@ -12,9 +12,15 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.2",
+    "@remotion/bundler": "^4.0.503",
+    "@remotion/media-utils": "^4.0.503",
+    "@remotion/renderer": "^4.0.503",
     "dotenv": "^16.4.7",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "remotion": "^4.0.503",
     "zod": "^3.25.76"
   },
   "devDependencies": {

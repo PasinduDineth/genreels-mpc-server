@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -16,6 +16,10 @@ const envSchema = z.object({
   VIDEO_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(1_200_000),
   REMOTE_IMAGE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   REMOTE_IMAGE_MAX_BYTES: z.coerce.number().int().positive().default(20_000_000),
+  REMOTION_OUTPUT_DIR: z.string().min(1).default("/workspace/generated/remotion"),
+  REMOTION_JOB_DIR: z.string().min(1).default("/workspace/ai-stack/run/remotion-jobs"),
+  REMOTION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(4_000),
+  REMOTION_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(1_800_000),
 });
 
 const parsed = envSchema.safeParse(process.env);
