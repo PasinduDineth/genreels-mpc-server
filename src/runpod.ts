@@ -212,19 +212,25 @@ export async function ensureMode(mode: Exclude<Mode, "off">): Promise<ControlSta
 export async function generateSpeech(input: {
   text: string;
   voice?: string;
+  language?: string;
+  instructions?: string;
   speed?: number;
 }): Promise<SpeechGenerationResult> {
   await ensureMode("tts");
 
   const voice = input.voice?.trim() || "Ryan";
+  const language = input.language?.trim() || "English";
+  const instructions = input.instructions?.trim();
   const response = await request(
     "/v1/audio/speech",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "tts-1",
+        model: language.toLowerCase() === "english" ? "tts-1-en" : "tts-1",
         voice,
+        language,
+        ...(instructions ? { instruct: instructions } : {}),
         input: input.text,
         response_format: "wav",
         speed: input.speed ?? 1,
@@ -254,7 +260,10 @@ export async function generateSpeech(input: {
     ? `${config.MCP_PUBLIC_BASE_URL}/files/generated/audio/${encodeURIComponent(filename)}`
     : undefined;
 
-  logger.info({ voice, byteLength: bytes.byteLength, contentType, outputPath, audioUrl }, "Speech generated");
+  logger.info(
+    { voice, language, hasInstructions: Boolean(instructions), byteLength: bytes.byteLength, contentType, outputPath, audioUrl },
+    "Speech generated",
+  );
   return {
     bytes,
     mimeType: contentType === "application/octet-stream" ? "audio/wav" : contentType,

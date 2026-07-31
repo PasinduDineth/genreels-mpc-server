@@ -141,6 +141,15 @@ function createMcpServer(): McpServer {
       inputSchema: {
         text: z.string().min(1).max(1500).describe("Text to synthesize as speech."),
         voice: z.string().min(1).max(100).default("Ryan").describe("Qwen3-TTS voice name, such as Ryan."),
+        language: z.string().min(1).max(50).default("English").describe("Spoken language, such as English."),
+        instructions: z
+          .string()
+          .min(1)
+          .max(2000)
+          .default(
+            "Speak clearly and naturally with consistent tone, energy, volume, and rhythm. Use smooth transitions and short pauses without adding silence between paragraphs.",
+          )
+          .describe("Natural-language direction for voice style, emotion, pacing, pauses, and delivery."),
         speed: z.number().min(0.25).max(4).default(1).describe("Speech speed multiplier."),
       },
     },
@@ -154,8 +163,23 @@ function createMcpServer(): McpServer {
         }
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
-        logger.info({ tool: "generate_speech", voice: args.voice, textLength: args.text.length }, "MCP tool invoked");
-        const result = await generateSpeech({ text: args.text, voice: args.voice, speed: args.speed });
+        logger.info(
+          {
+            tool: "generate_speech",
+            voice: args.voice,
+            language: args.language,
+            instructionsLength: args.instructions.length,
+            textLength: args.text.length,
+          },
+          "MCP tool invoked",
+        );
+        const result = await generateSpeech({
+          text: args.text,
+          voice: args.voice,
+          language: args.language,
+          instructions: args.instructions,
+          speed: args.speed,
+        });
         const data = Buffer.from(result.bytes).toString("base64");
         return {
           content: [

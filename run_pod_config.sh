@@ -243,7 +243,7 @@ section "System dependencies"
 run_logged "Updating apt package metadata..." apt-get update -qq
 run_logged "Installing base packages..." \
   apt-get install -y --no-install-recommends \
-    ca-certificates curl git ffmpeg jq procps iproute2 \
+    ca-certificates curl git ffmpeg sox libsox-fmt-all jq procps iproute2 \
     python3 python3-venv python3-pip
 
 command -v nvidia-smi >/dev/null 2>&1 \
