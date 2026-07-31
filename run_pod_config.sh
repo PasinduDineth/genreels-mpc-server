@@ -1510,6 +1510,7 @@ cat >"$CONFIG_FILE" <<JSON
   "tts_backend": "$TTS_BACKEND",
   "tts_lazy_load": "$TTS_LAZY_LOAD",
   "tts_preflight": "$TTS_PREFLIGHT",
+  "tts_autochunk": "$TTS_AUTOCHUNK",
   "hf_home": "$HF_HOME",
   "llm_enabled": $LLM_ENABLED,
   "ollama_model": "$OLLAMA_MODEL",
@@ -1862,7 +1863,7 @@ def start_tts_sync() -> int:
             "TTS_BACKEND": str(CONFIG["tts_backend"]),
             "TTS_MODEL_NAME": str(CONFIG["tts_model_name"]),
             "TTS_LAZY_LOAD": str(CONFIG["tts_lazy_load"]).lower(),
-            "TTS_AUTOCHUNK": str(TTS_AUTOCHUNK).lower(),
+            "TTS_AUTOCHUNK": str(CONFIG["tts_autochunk"]).lower(),
         }
     )
 
