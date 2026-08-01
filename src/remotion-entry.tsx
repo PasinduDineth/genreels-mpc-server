@@ -1,4 +1,4 @@
-﻿import { registerRoot, Composition } from 'remotion';
+import { registerRoot, Composition } from 'remotion';
 import { z } from 'zod';
 import { StoryComposition } from './remotion-compose';
 
@@ -7,6 +7,7 @@ const schema = z.object({
   subtitle: z.string().optional(),
   narrationUrl: z.string().url().optional(),
   musicUrl: z.string().url().optional(),
+  debugLabel: z.string().optional(),
   segments: z.array(z.object({
     src: z.string().url(),
     durationSeconds: z.number().positive(),

@@ -1,5 +1,5 @@
 import { bundle } from '@remotion/bundler';
-import { renderMedia } from '@remotion/renderer';
+import { renderMedia, selectComposition } from '@remotion/renderer';
 import { mkdir, writeFile, access, readFile, copyFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -238,18 +238,31 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
         },
         'Rendering compose job',
       );
+      const inputProps = { ...prepared, debugLabel: jobId };
+      const selectedComposition = await selectComposition({
+        serveUrl,
+        id: 'StoryComposition',
+        inputProps,
+      });
+      const composition = { ...selectedComposition, durationInFrames };
+      logger.info(
+        {
+          jobId,
+          selectedComposition: {
+            id: composition.id,
+            width: composition.width,
+            height: composition.height,
+            fps: composition.fps,
+            durationInFrames: composition.durationInFrames,
+          },
+        },
+        'Remotion composition selected',
+      );
       await renderMedia({
         serveUrl,
         codec: 'h264',
-        composition: {
-          id: 'StoryComposition',
-          width: 1080,
-          height: 1920,
-          fps: 30,
-          durationInFrames,
-          defaultProps: prepared,
-        } as never,
-        inputProps: { ...prepared, debugLabel: jobId },
+        composition,
+        inputProps,
         outputLocation: outputPath,
         overwrite: true,
         browserExecutable: null,

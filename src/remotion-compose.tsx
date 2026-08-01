@@ -38,6 +38,29 @@ function Overlay({ title, subtitle, debugLabel }: { title?: string; subtitle?: s
   );
 }
 
+function DebugPanel({
+  segments,
+  narrationUrl,
+  musicUrl,
+  debugLabel,
+}: {
+  segments: StorySegment[];
+  narrationUrl?: string;
+  musicUrl?: string;
+  debugLabel?: string;
+}) {
+  if (!debugLabel) return null;
+
+  const firstSegment = segments[0];
+  return (
+    <div style={{ position: 'absolute', top: 28, left: 28, right: 28, zIndex: 100, padding: '16px 20px', borderRadius: 14, backgroundColor: 'rgba(0, 0, 0, 0.72)', color: '#7dffad', fontFamily: 'monospace', fontSize: 18, lineHeight: 1.35, overflow: 'hidden' }}>
+      <div>job: {debugLabel}</div>
+      <div>segments: {segments.length} | narration: {narrationUrl ? 'yes' : 'no'} | music: {musicUrl ? 'yes' : 'no'}</div>
+      <div>first: {firstSegment ? `${firstSegment.kind} ${firstSegment.durationSeconds}s` : 'missing'}</div>
+      <div style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>src: {firstSegment?.src ?? 'missing'}</div>
+    </div>
+  );
+}
 export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl, debugLabel }: StoryCompositionProps) {
   const safeSegments = Array.isArray(segments) ? segments : [];
   const { fps } = useVideoConfig();
