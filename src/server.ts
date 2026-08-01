@@ -30,10 +30,7 @@ async function refreshActiveVideoJobs(): Promise<string[]> {
               job_id?: unknown;
               status?: unknown;
             };
-            if (
-              typeof job.job_id === "string" &&
-              (job.status === "queued" || job.status === "processing")
-            ) {
+            if (typeof job.job_id === "string" && (job.status === "queued" || job.status === "processing")) {
               persistedActiveJobs.add(job.job_id);
             }
           } catch (error) {
@@ -67,26 +64,11 @@ const openAiImageFileSchema = z.union([
   z.string().describe("ChatGPT platform file reference; the client replaces this with a downloadable file object."),
 ]).optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation.");
 
-const videoFrameCountSchema = z.number()
-  .int()
-  .min(25)
-  .max(121)
-  .refine((value) => (value - 1) % 4 === 0, "num_frames must follow 4n + 1")
-  .default(121)
-  .describe("Number of generated frames. Must follow 4n + 1. Use 61 with 12 FPS for a fast 5-second clip, 81 with 16 FPS for balanced, or 121 with 24 FPS for quality.");
+const videoFrameCountSchema = z.number().int().min(25).max(121).refine((value) => (value - 1) % 4 === 0, "num_frames must follow 4n + 1").default(121).describe("Number of generated frames. Must follow 4n + 1. Use 61 with 12 FPS for a fast 5-second clip, 81 with 16 FPS for balanced, or 121 with 24 FPS for quality.");
 
-const videoFpsSchema = z.number()
-  .int()
-  .min(8)
-  .max(24)
-  .default(24)
-  .describe("Output frames per second. Approximate duration is (num_frames - 1) / fps seconds.");
+const videoFpsSchema = z.number().int().min(8).max(24).default(24).describe("Output frames per second. Approximate duration is (num_frames - 1) / fps seconds.");
 
-function getVideoImageUrl(args: { image_url?: string; image_file?: unknown }): {
-  imageUrl: string;
-  source: "url" | "chatgpt_file";
-  fileId?: string;
-} {
+function getVideoImageUrl(args: { image_url?: string; image_file?: unknown }): { imageUrl: string; source: "url" | "chatgpt_file"; fileId?: string } {
   if (args.image_file !== undefined && args.image_file !== null) {
     if (typeof args.image_file === "string") {
       throw new Error("ChatGPT passed an unresolved local file reference instead of a downloadable file object. Refresh or recreate the connector, reattach the image, and try again.");
@@ -143,14 +125,7 @@ function createMcpServer(): McpServer {
         text: z.string().min(1).max(1500).describe("Text to synthesize as speech."),
         voice: z.string().min(1).max(100).default("Ryan").describe("Qwen3-TTS voice name, such as Ryan."),
         language: z.string().min(1).max(50).default("English").describe("Spoken language, such as English."),
-        instructions: z
-          .string()
-          .min(1)
-          .max(2000)
-          .default(
-            "Speak clearly and naturally with consistent tone, energy, volume, and rhythm. Use smooth transitions and short pauses without adding silence between paragraphs.",
-          )
-          .describe("Natural-language direction for voice style, emotion, pacing, pauses, and delivery."),
+        instructions: z.string().min(1).max(2000).default("Speak clearly and naturally with consistent tone, energy, volume, and rhythm. Use smooth transitions and short pauses without adding silence between paragraphs.").describe("Natural-language direction for voice style, emotion, pacing, pauses, and delivery."),
         speed: z.number().min(0.25).max(4).default(1).describe("Speech speed multiplier."),
       },
     },
@@ -164,44 +139,10 @@ function createMcpServer(): McpServer {
         }
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
-        logger.info(
-          {
-            tool: "generate_speech",
-            voice: args.voice,
-            language: args.language,
-            instructionsLength: args.instructions.length,
-            textLength: args.text.length,
-          },
-          "MCP tool invoked",
-        );
-        const result = await generateSpeech({
-          text: args.text,
-          voice: args.voice,
-          language: args.language,
-          instructions: args.instructions,
-          speed: args.speed,
-        });
+        logger.info({ tool: "generate_speech", voice: args.voice, language: args.language, instructionsLength: args.instructions.length, textLength: args.text.length }, "MCP tool invoked");
+        const result = await generateSpeech({ text: args.text, voice: args.voice, language: args.language, instructions: args.instructions, speed: args.speed });
         const data = Buffer.from(result.bytes).toString("base64");
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: result.audioUrl
-                ? `Speech generated successfully with voice ${result.voice}: ${result.audioUrl}`
-                : `Speech generated successfully with voice ${result.voice}.`,
-            },
-            { type: "audio" as const, data, mimeType: result.mimeType },
-          ],
-          structuredContent: {
-            ok: true,
-            type: "audio",
-            format: result.format,
-            mime_type: result.mimeType,
-            voice: result.voice,
-            byte_length: result.bytes.byteLength,
-            ...(result.audioUrl ? { audio_url: result.audioUrl } : {}),
-          },
-        };
+        return { content: [{ type: "text" as const, text: result.audioUrl ? `Speech generated successfully with voice ${result.voice}: ${result.audioUrl}` : `Speech generated successfully with voice ${result.voice}.` }, { type: "audio" as const, data, mimeType: result.mimeType }], structuredContent: { ok: true, type: "audio", format: result.format, mime_type: result.mimeType, voice: result.voice, byte_length: result.bytes.byteLength, ...(result.audioUrl ? { audio_url: result.audioUrl } : {}) } };
       } catch (error) {
         return errorResult(error);
       } finally {
@@ -222,17 +163,7 @@ function createMcpServer(): McpServer {
       try {
         const activeJobIds = await refreshActiveVideoJobs();
         const [healthResult, status] = await Promise.all([health(), getStatus()]);
-        return textResult(
-          activeJobIds.length > 0
-            ? `RunPod gateway is reachable. Active video job IDs: ${activeJobIds.join(", ")}`
-            : "RunPod gateway is reachable. There are no MCP-tracked active video jobs.",
-          {
-            ok: true,
-            health: healthResult,
-            status,
-            active_video_job_ids: activeJobIds,
-          },
-        );
+        return textResult(activeJobIds.length > 0 ? `RunPod gateway is reachable. Active video job IDs: ${activeJobIds.join(", ")}` : "RunPod gateway is reachable. There are no MCP-tracked active video jobs.", { ok: true, health: healthResult, status, active_video_job_ids: activeJobIds });
       } catch (error) {
         return errorResult(error);
       }
@@ -245,18 +176,8 @@ function createMcpServer(): McpServer {
       title: "Generate 5-second video from image",
       description:
         "Submit a HunyuanVideo image-to-video job using a ChatGPT-generated/uploaded image or a publicly reachable image URL. Prefer image_file for an image created or attached in this chat. Use this for a 5-second 480x832 portrait clip. The tool switches the GPU into video mode and returns immediately with a job ID; call check_video_job afterward.",
-      inputSchema: {
-        image_file: openAiImageFileSchema,
-        image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
-        prompt: z.string().min(1).max(4000).describe("Motion/camera prompt describing how the input image should animate."),
-        steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
-        num_frames: videoFrameCountSchema,
-        fps: videoFpsSchema,
-        seed: z.number().int().nonnegative().optional(),
-      },
-      _meta: {
-        "openai/fileParams": ["image_file"],
-      },
+      inputSchema: { image_file: openAiImageFileSchema, image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."), prompt: z.string().min(1).max(4000).describe("Motion/camera prompt describing how the input image should animate."), steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8), num_frames: videoFrameCountSchema, fps: videoFpsSchema, seed: z.number().int().nonnegative().optional() },
+      _meta: { "openai/fileParams": ["image_file"] },
     },
     async (args) => {
       let acquiredGenerationLock = false;
@@ -268,20 +189,9 @@ function createMcpServer(): McpServer {
         acquiredGenerationLock = true;
         const image = getVideoImageUrl(args);
         logger.info({ tool: "generate_video_from_image", imageSource: image.source, fileId: image.fileId, steps: args.steps, numFrames: args.num_frames, fps: args.fps }, "MCP tool invoked");
-        const result = await startVideo({
-          imageUrl: image.imageUrl,
-          prompt: args.prompt,
-          steps: args.steps,
-          numFrames: args.num_frames,
-          fps: args.fps,
-          seed: args.seed,
-        });
+        const result = await startVideo({ imageUrl: image.imageUrl, prompt: args.prompt, steps: args.steps, numFrames: args.num_frames, fps: args.fps, seed: args.seed });
         activeVideoJobs.add(result.job_id);
-        return textResult(`Video job accepted. Job ID: ${result.job_id}`, {
-          ok: true,
-          type: "video_job",
-          ...result,
-        });
+        return textResult(`Video job accepted. Job ID: ${result.job_id}`, { ok: true, type: "video_job", ...result });
       } catch (error) {
         return errorResult(error);
       } finally {
@@ -296,21 +206,14 @@ function createMcpServer(): McpServer {
       title: "Check video generation job",
       description:
         "Read-only. Check a previously submitted HunyuanVideo job. Use the job_id returned by generate_video_from_image. When completed, the response contains video_url.",
-      inputSchema: {
-        job_id: z.string().regex(/^[0-9a-f]{32}$/).describe("32-character hexadecimal video job ID."),
-      },
+      inputSchema: { job_id: z.string().regex(/^[0-9a-f]{32}$/).describe("32-character hexadecimal video job ID.") },
       annotations: { readOnlyHint: true },
     },
     async ({ job_id }) => {
       try {
         const result = await getVideoJob(job_id);
         if (result.status === "completed" || result.status === "failed") activeVideoJobs.delete(job_id);
-        const message =
-          result.status === "completed"
-            ? `Video completed: ${result.video_url}`
-            : result.status === "failed"
-              ? `Video failed: ${result.error ?? "unknown error"}`
-              : `Video is ${result.status}${result.stage ? ` (${result.stage})` : ""}.`;
+        const message = result.status === "completed" ? `Video completed: ${result.video_url}` : result.status === "failed" ? `Video failed: ${result.error ?? "unknown error"}` : `Video is ${result.status}${result.stage ? ` (${result.stage})` : ""}.`;
         return textResult(message, { ok: result.status !== "failed", type: "video_job", ...result });
       } catch (error) {
         return errorResult(error);
@@ -324,18 +227,8 @@ function createMcpServer(): McpServer {
       title: "Generate 5-second video (legacy async alias)",
       description:
         "Backward-compatible alias for generate_video_from_image. Submit a 5-second HunyuanVideo job from a ChatGPT-generated/uploaded image or public image URL and return the job ID immediately. This tool does not wait, because video rendering can exceed MCP request timeouts. Poll check_video_job with the returned job_id until completion.",
-      inputSchema: {
-        image_file: openAiImageFileSchema,
-        image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
-        prompt: z.string().min(1).max(4000),
-        steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
-        num_frames: videoFrameCountSchema,
-        fps: videoFpsSchema,
-        seed: z.number().int().nonnegative().optional(),
-      },
-      _meta: {
-        "openai/fileParams": ["image_file"],
-      },
+      inputSchema: { image_file: openAiImageFileSchema, image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."), prompt: z.string().min(1).max(4000), steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8), num_frames: videoFrameCountSchema, fps: videoFpsSchema, seed: z.number().int().nonnegative().optional() },
+      _meta: { "openai/fileParams": ["image_file"] },
     },
     async (args) => {
       let acquiredGenerationLock = false;
@@ -347,20 +240,9 @@ function createMcpServer(): McpServer {
         acquiredGenerationLock = true;
         const image = getVideoImageUrl(args);
         logger.info({ tool: "generate_video_and_wait", imageSource: image.source, fileId: image.fileId, steps: args.steps, numFrames: args.num_frames, fps: args.fps }, "MCP tool invoked");
-        const submitted = await startVideo({
-          imageUrl: image.imageUrl,
-          prompt: args.prompt,
-          steps: args.steps,
-          numFrames: args.num_frames,
-          fps: args.fps,
-          seed: args.seed,
-        });
+        const submitted = await startVideo({ imageUrl: image.imageUrl, prompt: args.prompt, steps: args.steps, numFrames: args.num_frames, fps: args.fps, seed: args.seed });
         activeVideoJobs.add(submitted.job_id);
-        return textResult(`Video job accepted. Job ID: ${submitted.job_id}. Poll check_video_job until it completes.`, {
-          ok: true,
-          type: "video_job",
-          ...submitted,
-        });
+        return textResult(`Video job accepted. Job ID: ${submitted.job_id}. Poll check_video_job until it completes.`, { ok: true, type: "video_job", ...submitted });
       } catch (error) {
         return errorResult(error);
       } finally {
@@ -380,29 +262,13 @@ function createMcpServer(): McpServer {
         subtitle: z.string().max(240).optional(),
         narration_url: z.string().url().optional(),
         music_url: z.string().url().optional(),
-        segments: z.array(z.object({
-          src: z.string().url(),
-          duration_seconds: z.number().positive().max(30),
-          kind: z.union([z.literal("video"), z.literal("image")]),
-          caption: z.string().max(140).optional(),
-        })).min(1).max(30),
+        segments: z.array(z.object({ src: z.string().url(), duration_seconds: z.number().positive().max(30), kind: z.union([z.literal("video"), z.literal("image")]), caption: z.string().max(140).optional() })).min(1).max(30),
       },
     },
     async (args) => {
       try {
         logger.info({ tool: "compose_video_story", segmentCount: args.segments.length, hasNarration: Boolean(args.narration_url), hasMusic: Boolean(args.music_url) }, "MCP tool invoked");
-        const result = await submitComposeJob({
-          title: args.title,
-          subtitle: args.subtitle,
-          narrationUrl: args.narration_url,
-          musicUrl: args.music_url,
-          segments: args.segments.map((segment) => ({
-            src: segment.src,
-            durationSeconds: segment.duration_seconds,
-            kind: segment.kind,
-            caption: segment.caption,
-          })),
-        });
+        const result = await submitComposeJob({ title: args.title, subtitle: args.subtitle, narrationUrl: args.narration_url, musicUrl: args.music_url, segments: args.segments.map((segment) => ({ src: segment.src, durationSeconds: segment.duration_seconds, kind: segment.kind, caption: segment.caption })) });
         return textResult(`Compose job accepted. Job ID: ${result.jobId}`, { ok: true, type: "compose_job", ...result });
       } catch (error) {
         return errorResult(error);
@@ -428,7 +294,7 @@ function createMcpServer(): McpServer {
         return errorResult(error);
       }
     },
-    );
+  );
 
   return server;
 }
@@ -452,16 +318,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
   if (req.method === "GET" && url.pathname === "/") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(
-      JSON.stringify({
-        service: "runpod-ai-mcp-server",
-        status: "ok",
-        mcp: MCP_PATH,
-        connector_url: "/",
-        alternate_mcp: MCP_ALTERNATE_PATH,
-        neutral_connector: MCP_CONNECTOR_PATH,
-      }),
-    );
+    res.end(JSON.stringify({ service: "runpod-ai-mcp-server", status: "ok", mcp: MCP_PATH, connector_url: "/", alternate_mcp: MCP_ALTERNATE_PATH, neutral_connector: MCP_CONNECTOR_PATH }));
     return;
   }
 
@@ -478,6 +335,38 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     return;
   }
 
+  const audioPrefix = "/files/generated/audio/";
+  if (req.method === "GET" && url.pathname.startsWith(audioPrefix)) {
+    const filename = path.basename(decodeURIComponent(url.pathname.slice(audioPrefix.length)));
+    const filePath = path.join(config.AUDIO_OUTPUT_DIR, filename);
+    try {
+      const info = await stat(filePath);
+      if (!info.isFile() || path.extname(filename).toLowerCase() !== ".wav") throw new Error("Not a WAV file");
+      res.writeHead(200, { "content-type": "audio/wav", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable" });
+      createReadStream(filePath).pipe(res);
+    } catch {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: "Generated audio not found." }));
+    }
+    return;
+  }
+
+  const remotionPrefix = "/files/generated/remotion/";
+  if (req.method === "GET" && url.pathname.startsWith(remotionPrefix)) {
+    const filename = path.basename(decodeURIComponent(url.pathname.slice(remotionPrefix.length)));
+    const filePath = path.join(config.REMOTION_OUTPUT_DIR, filename);
+    try {
+      const info = await stat(filePath);
+      if (!info.isFile() || path.extname(filename).toLowerCase() !== ".mp4") throw new Error("Not an MP4 file");
+      res.writeHead(200, { "content-type": "video/mp4", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable" });
+      createReadStream(filePath).pipe(res);
+    } catch {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ detail: "Generated remotion video not found." }));
+    }
+    return;
+  }
+
   if (req.method === "OPTIONS" && MCP_POST_PATHS.has(url.pathname)) {
     setCors(res);
     res.writeHead(204).end();
@@ -488,10 +377,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
   if (MCP_POST_PATHS.has(url.pathname) && req.method && allowedMethods.has(req.method)) {
     setCors(res);
     const server = createMcpServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
 
     res.on("close", () => {
       void transport.close();
@@ -512,14 +398,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 });
 
 httpServer.listen(config.PORT, "0.0.0.0", () => {
-  logger.info(
-    {
-      port: config.PORT,
-      mcpUrl: `http://localhost:${config.PORT}${MCP_PATH}`,
-      runpodBaseUrl: config.RUNPOD_BASE_URL,
-    },
-    "RunPod AI MCP server started",
-  );
+  logger.info({ port: config.PORT, mcpUrl: `http://localhost:${config.PORT}${MCP_PATH}`, runpodBaseUrl: config.RUNPOD_BASE_URL }, "RunPod AI MCP server started");
 });
 
 const shutdown = (signal: string) => {
@@ -535,10 +414,3 @@ const shutdown = (signal: string) => {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
-
-
-
-
-
-
-
