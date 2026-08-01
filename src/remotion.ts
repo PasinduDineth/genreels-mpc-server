@@ -9,17 +9,15 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
+const COMPOSITION_FPS = 24;
 
 export type ComposeSegment = {
   src: string;
   durationSeconds: number;
   kind: 'video' | 'image';
-  caption?: string;
 };
 
 export type ComposeVideoInput = {
-  title?: string;
-  subtitle?: string;
   segments?: ComposeSegment[];
   narrationUrl?: string;
   musicUrl?: string;
@@ -127,7 +125,7 @@ async function transcodeVideoToBrowserFriendly(inputPath: string, outputPath: st
     '-y',
     '-i', inputPath,
     '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p',
-    '-r', '30',
+    '-r', String(COMPOSITION_FPS),
     '-c:v', 'libx264',
     '-preset', 'veryfast',
     '-crf', '20',
@@ -189,7 +187,7 @@ async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Pro
     {
       jobId,
       segmentCount: prepared.segments.length,
-      segments: prepared.segments.map((segment, index) => ({ index, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src, caption: segment.caption ?? null })),
+      segments: prepared.segments.map((segment, index) => ({ index, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src })),
       hasNarration: Boolean(prepared.narrationUrl),
       hasMusic: Boolean(prepared.musicUrl),
     },
@@ -208,16 +206,15 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
   void (async () => {
     try {
       status.status = 'processing';
-      logger.info({ jobId, title: input.title, subtitle: input.subtitle, segmentCount: input.segments?.length ?? 0, hasNarration: Boolean(input.narrationUrl), hasMusic: Boolean(input.musicUrl) }, 'Compose job started');
+      logger.info({ jobId, segmentCount: input.segments?.length ?? 0, hasNarration: Boolean(input.narrationUrl), hasMusic: Boolean(input.musicUrl) }, 'Compose job started');
       const prepared = await prepareComposeInput(input, jobId);
       const serveUrl = await getBundleUrl();
       const segmentFrames = prepared.segments.map((segment, index) => ({
         index,
         kind: segment.kind,
         durationSeconds: segment.durationSeconds,
-        durationInFrames: Math.max(1, Math.round(segment.durationSeconds * 30)),
+        durationInFrames: Math.max(1, Math.round(segment.durationSeconds * COMPOSITION_FPS)),
         src: segment.src,
-        caption: segment.caption ?? null,
       }));
       const durationInFrames = Math.max(1, segmentFrames.reduce((sum, seg) => sum + seg.durationInFrames, 0));
       logger.info(
@@ -230,15 +227,10 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
           narrationUrl: prepared.narrationUrl ?? null,
           musicUrl: prepared.musicUrl ?? null,
           serveUrl,
-          inputProps: {
-            title: prepared.title ?? null,
-            subtitle: prepared.subtitle ?? null,
-            debugLabel: jobId,
-          },
         },
         'Rendering compose job',
       );
-      const inputProps = { ...prepared, debugLabel: jobId };
+      const inputProps = prepared;
       const selectedComposition = await selectComposition({
         serveUrl,
         id: 'StoryComposition',

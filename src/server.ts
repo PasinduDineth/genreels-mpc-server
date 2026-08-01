@@ -258,17 +258,15 @@ function createMcpServer(): McpServer {
       description:
         "Assemble multiple generated clips, optional narration, and optional music into a single 9:16 TikTok-style MP4 using Remotion. The tool returns immediately with a job ID; poll check_compose_job for the final video_url.",
       inputSchema: {
-        title: z.string().max(120).optional(),
-        subtitle: z.string().max(240).optional(),
         narration_url: z.string().url().optional(),
         music_url: z.string().url().optional(),
-        segments: z.array(z.object({ src: z.string().url(), duration_seconds: z.number().positive().max(30), kind: z.union([z.literal("video"), z.literal("image")]), caption: z.string().max(140).optional() })).min(1).max(30),
+        segments: z.array(z.object({ src: z.string().url(), duration_seconds: z.number().positive().max(30), kind: z.union([z.literal("video"), z.literal("image")]) })).min(1).max(30),
       },
     },
     async (args) => {
       try {
         logger.info({ tool: "compose_video_story", segmentCount: args.segments.length, hasNarration: Boolean(args.narration_url), hasMusic: Boolean(args.music_url) }, "MCP tool invoked");
-        const result = await submitComposeJob({ title: args.title, subtitle: args.subtitle, narrationUrl: args.narration_url, musicUrl: args.music_url, segments: args.segments.map((segment) => ({ src: segment.src, durationSeconds: segment.duration_seconds, kind: segment.kind, caption: segment.caption })) });
+        const result = await submitComposeJob({ narrationUrl: args.narration_url, musicUrl: args.music_url, segments: args.segments.map((segment) => ({ src: segment.src, durationSeconds: segment.duration_seconds, kind: segment.kind })) });
         return textResult(`Compose job accepted. Job ID: ${result.jobId}`, { ok: true, type: "compose_job", ...result });
       } catch (error) {
         return errorResult(error);
