@@ -1,6 +1,6 @@
 ﻿import { bundle } from '@remotion/bundler';
 import { renderMedia } from '@remotion/renderer';
-import { mkdir, writeFile, access } from 'node:fs/promises';
+import { mkdir, writeFile, access, readFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -71,6 +71,10 @@ function toFileUrl(filePath: string): string {
   return `file://${filePath.replace(/\\/g, '/')}`;
 }
 
+function toDataUrl(bytes: Uint8Array, mimeType: string): string {
+  return `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`;
+}
+
 function getExtensionFromUrl(url: string, fallback: string): string {
   try {
     const ext = path.extname(new URL(url).pathname);
@@ -138,6 +142,14 @@ async function normalizeMediaAsset(inputUrl: string, jobId: string, kind: 'video
     return toFileUrl(outputPath);
   }
 
+  if (kind === 'audio') {
+    const bytes = await readFile(rawPath);
+    const mimeType = ext.toLowerCase() === '.mp3' ? 'audio/mpeg' : 'audio/wav';
+    const dataUrl = toDataUrl(new Uint8Array(bytes), mimeType);
+    logger.info({ jobId, label: `${kind}:${index}:dataurl`, byteLength: bytes.byteLength }, 'Audio asset converted to data URL');
+    return dataUrl;
+  }
+
   return toFileUrl(rawPath);
 }
 
@@ -154,11 +166,11 @@ async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Pro
   const prepared: ComposeVideoInput & { segments: ComposeSegment[] } = { ...input, segments: localSegments };
   if (input.narrationUrl) {
     prepared.narrationUrl = await normalizeMediaAsset(input.narrationUrl, jobId, 'audio', 0);
-    logger.info({ jobId, narrationUrl: prepared.narrationUrl }, 'Narration audio attached');
+    logger.info({ jobId, narrationIsDataUrl: prepared.narrationUrl.startsWith('data:') }, 'Narration audio attached');
   }
   if (input.musicUrl) {
     prepared.musicUrl = await normalizeMediaAsset(input.musicUrl, jobId, 'audio', 1);
-    logger.info({ jobId, musicUrl: prepared.musicUrl }, 'Music audio attached');
+    logger.info({ jobId, musicIsDataUrl: prepared.musicUrl.startsWith('data:') }, 'Music audio attached');
   }
   return prepared;
 }
