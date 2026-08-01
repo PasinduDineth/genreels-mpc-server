@@ -1,5 +1,5 @@
 import React from 'react';
-import { Audio, AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
+import { Audio, AbsoluteFill, Img, OffthreadVideo, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 
 export type StorySegment = {
   src: string;
@@ -24,101 +24,44 @@ const CONTAINER_STYLE: React.CSSProperties = {
   fontFamily: 'Arial, Helvetica, sans-serif',
 };
 
-function Overlay({ title, subtitle }: { title?: string; subtitle?: string }) {
+function Overlay({ title, subtitle, debugLabel }: { title?: string; subtitle?: string; debugLabel?: string }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const opacity = interpolate(frame, [0, fps * 0.5, fps * 1.5], [0, 1, 1], { extrapolateRight: 'clamp' });
+  const opacity = interpolate(frame, [0, fps * 0.25, fps * 1.0], [0, 1, 1], { extrapolateRight: 'clamp' });
 
   return (
-    <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '96px 72px', pointerEvents: 'none', opacity }}>
-      {title ? <div style={{ fontSize: 72, fontWeight: 800, lineHeight: 1.04, textShadow: '0 8px 30px rgba(0,0,0,0.45)' }}>{title}</div> : null}
-      {subtitle ? <div style={{ marginTop: 24, fontSize: 32, fontWeight: 500, maxWidth: 900, lineHeight: 1.3, color: 'rgba(255,255,255,0.9)' }}>{subtitle}</div> : null}
-    </AbsoluteFill>
-  );
-}
-
-function DebugOverlay({
-  debugLabel,
-  segmentIndex,
-  segmentCount,
-  segmentSrc,
-  segmentKind,
-}: {
-  debugLabel?: string;
-  segmentIndex: number;
-  segmentCount: number;
-  segmentSrc: string;
-  segmentKind: StorySegment['kind'];
-}) {
-  return (
-    <AbsoluteFill
-      style={{
-        justifyContent: 'flex-start',
-        alignItems: 'flex-start',
-        padding: '28px 32px',
-        pointerEvents: 'none',
-        fontSize: 18,
-        fontWeight: 700,
-        lineHeight: 1.35,
-        color: 'rgba(255,255,255,0.92)',
-        textShadow: '0 2px 10px rgba(0,0,0,0.8)',
-      }}
-    >
-      <div style={{ background: 'rgba(0,0,0,0.35)', padding: '12px 14px', borderRadius: 12, maxWidth: 980 }}>
-        {debugLabel ? <div>DEBUG: {debugLabel}</div> : null}
-        <div>
-          SEGMENT: {segmentIndex + 1}/{segmentCount} {segmentKind}
-        </div>
-        <div style={{ wordBreak: 'break-all' }}>{segmentSrc}</div>
-      </div>
+    <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '64px 56px', pointerEvents: 'none', opacity }}>
+      {debugLabel ? <div style={{ marginBottom: 16, fontSize: 20, fontWeight: 700, opacity: 0.9 }}>DEBUG: {debugLabel}</div> : null}
+      {title ? <div style={{ fontSize: 68, fontWeight: 800, lineHeight: 1.04, textShadow: '0 8px 30px rgba(0,0,0,0.45)' }}>{title}</div> : null}
+      {subtitle ? <div style={{ marginTop: 20, fontSize: 30, fontWeight: 500, maxWidth: 920, lineHeight: 1.3, color: 'rgba(255,255,255,0.9)' }}>{subtitle}</div> : null}
     </AbsoluteFill>
   );
 }
 
 export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl, debugLabel }: StoryCompositionProps) {
   const safeSegments = Array.isArray(segments) ? segments : [];
-  const sequences: React.ReactElement[] = [];
-  let from = 0;
-
-  for (let index = 0; index < safeSegments.length; index += 1) {
-    const segment = safeSegments[index];
-    const durationInFrames = Math.max(1, Math.round(segment.durationSeconds * 30));
-    const media = segment.kind === 'video' ? (
-      <OffthreadVideo src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted={Boolean(narrationUrl)} />
-    ) : (
-      <Img src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-    );
-
-    sequences.push(
-      <Sequence key={index} from={from} durationInFrames={durationInFrames}>
-        <AbsoluteFill>
-          {media}
-          <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(5,8,22,0.8), rgba(5,8,22,0.1) 45%, rgba(5,8,22,0.25))' }} />
-          {segment.caption ? (
-            <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 72px 220px', pointerEvents: 'none' }}>
-              <div style={{ fontSize: 40, fontWeight: 700, lineHeight: 1.15, maxWidth: 920, textShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>{segment.caption}</div>
-            </AbsoluteFill>
-          ) : null}
-          {debugLabel ? (
-            <DebugOverlay
-              debugLabel={debugLabel}
-              segmentIndex={index}
-              segmentCount={safeSegments.length}
-              segmentSrc={segment.src}
-              segmentKind={segment.kind}
-            />
-          ) : null}
-        </AbsoluteFill>
-      </Sequence>,
-    );
-
-    from += durationInFrames;
-  }
+  const firstSegment = safeSegments[0] ?? null;
+  const durationInFrames = Math.max(1, Math.round((firstSegment?.durationSeconds ?? 1) * 30));
 
   return (
     <AbsoluteFill style={CONTAINER_STYLE}>
-      {sequences}
-      {title || subtitle ? <Overlay title={title} subtitle={subtitle} /> : null}
+      {firstSegment ? (
+        <AbsoluteFill>
+          {firstSegment.kind === 'video' ? (
+            <OffthreadVideo src={firstSegment.src} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <Img src={firstSegment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          )}
+          <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(5,8,22,0.75), rgba(5,8,22,0.08) 45%, rgba(5,8,22,0.2))' }} />
+          {firstSegment.caption ? (
+            <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 64px 180px', pointerEvents: 'none' }}>
+              <div style={{ fontSize: 38, fontWeight: 700, lineHeight: 1.15, maxWidth: 920, textShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>{firstSegment.caption}</div>
+            </AbsoluteFill>
+          ) : null}
+        </AbsoluteFill>
+      ) : null}
+
+      {title || subtitle || debugLabel ? <Overlay title={title} subtitle={subtitle} debugLabel={debugLabel} /> : null}
       {narrationUrl ? <Audio src={narrationUrl} /> : null}
       {musicUrl ? <Audio src={musicUrl} volume={0.12} loop /> : null}
     </AbsoluteFill>
