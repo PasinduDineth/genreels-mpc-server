@@ -211,17 +211,30 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
       logger.info({ jobId, title: input.title, subtitle: input.subtitle, segmentCount: input.segments?.length ?? 0, hasNarration: Boolean(input.narrationUrl), hasMusic: Boolean(input.musicUrl) }, 'Compose job started');
       const prepared = await prepareComposeInput(input, jobId);
       const serveUrl = await getBundleUrl();
-      const durationInFrames = Math.max(1, Math.round(prepared.segments.reduce((sum, seg) => sum + seg.durationSeconds, 0) * 30));
+      const segmentFrames = prepared.segments.map((segment, index) => ({
+        index,
+        kind: segment.kind,
+        durationSeconds: segment.durationSeconds,
+        durationInFrames: Math.max(1, Math.round(segment.durationSeconds * 30)),
+        src: segment.src,
+        caption: segment.caption ?? null,
+      }));
+      const durationInFrames = Math.max(1, segmentFrames.reduce((sum, seg) => sum + seg.durationInFrames, 0));
       logger.info(
         {
           jobId,
           outputPath,
           durationInFrames,
           segmentCount: prepared.segments.length,
-          segments: prepared.segments.map((segment, index) => ({ index, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src, caption: segment.caption ?? null })),
-          hasNarration: Boolean(prepared.narrationUrl),
-          hasMusic: Boolean(prepared.musicUrl),
+          segmentFrames,
+          narrationUrl: prepared.narrationUrl ?? null,
+          musicUrl: prepared.musicUrl ?? null,
           serveUrl,
+          inputProps: {
+            title: prepared.title ?? null,
+            subtitle: prepared.subtitle ?? null,
+            debugLabel: jobId,
+          },
         },
         'Rendering compose job',
       );
@@ -259,4 +272,5 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
 export async function getComposeJob(jobId: string): Promise<ComposeJobStatus | undefined> {
   return jobState.get(jobId);
 }
+
 

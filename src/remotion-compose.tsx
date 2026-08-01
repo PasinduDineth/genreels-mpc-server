@@ -1,5 +1,5 @@
 import React from 'react';
-import { Audio, AbsoluteFill, Img, Video, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
+import { Audio, AbsoluteFill, Img, Sequence, Video, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 
 export type StorySegment = {
   src: string;
@@ -40,29 +40,40 @@ function Overlay({ title, subtitle, debugLabel }: { title?: string; subtitle?: s
 
 export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl, debugLabel }: StoryCompositionProps) {
   const safeSegments = Array.isArray(segments) ? segments : [];
-  const firstSegment = safeSegments[0] ?? null;
+  const { fps } = useVideoConfig();
+  const framesFor = (durationSeconds: number) => Math.max(1, Math.round(durationSeconds * fps));
+  let startFrame = 0;
 
   return (
     <AbsoluteFill style={CONTAINER_STYLE}>
-      {firstSegment ? (
-        <AbsoluteFill>
-          {firstSegment.kind === 'video' ? (
-            <Video src={firstSegment.src} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <Img src={firstSegment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          )}
-          <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(5,8,22,0.75), rgba(5,8,22,0.08) 45%, rgba(5,8,22,0.2))' }} />
-          {firstSegment.caption ? (
-            <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 64px 180px', pointerEvents: 'none' }}>
-              <div style={{ fontSize: 38, fontWeight: 700, lineHeight: 1.15, maxWidth: 920, textShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>{firstSegment.caption}</div>
+      {safeSegments.map((segment, index) => {
+        const durationInFrames = framesFor(segment.durationSeconds);
+        const from = startFrame;
+        startFrame += durationInFrames;
+        return (
+          <Sequence key={`${index}-${segment.src}`} from={from} durationInFrames={durationInFrames}>
+            <AbsoluteFill>
+              {segment.kind === 'video' ? (
+                <Video src={segment.src} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <Img src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              )}
+              <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(5,8,22,0.75), rgba(5,8,22,0.08) 45%, rgba(5,8,22,0.2))' }} />
+              {segment.caption ? (
+                <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 64px 180px', pointerEvents: 'none' }}>
+                  <div style={{ fontSize: 38, fontWeight: 700, lineHeight: 1.15, maxWidth: 920, textShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>{segment.caption}</div>
+                </AbsoluteFill>
+              ) : null}
             </AbsoluteFill>
-          ) : null}
-        </AbsoluteFill>
-      ) : null}
+          </Sequence>
+        );
+      })}
 
       {title || subtitle || debugLabel ? <Overlay title={title} subtitle={subtitle} debugLabel={debugLabel} /> : null}
+      <DebugPanel segments={safeSegments} narrationUrl={narrationUrl} musicUrl={musicUrl} debugLabel={debugLabel} />
       {narrationUrl ? <Audio src={narrationUrl} /> : null}
       {musicUrl ? <Audio src={musicUrl} volume={0.12} loop /> : null}
     </AbsoluteFill>
   );
 }
+
