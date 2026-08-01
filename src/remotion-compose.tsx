@@ -1,5 +1,5 @@
 import React from 'react';
-import { Audio, AbsoluteFill, Img, OffthreadVideo, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
+import { Audio, AbsoluteFill, Img, Video, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 
 export type StorySegment = {
   src: string;
@@ -41,14 +41,13 @@ function Overlay({ title, subtitle, debugLabel }: { title?: string; subtitle?: s
 export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl, debugLabel }: StoryCompositionProps) {
   const safeSegments = Array.isArray(segments) ? segments : [];
   const firstSegment = safeSegments[0] ?? null;
-  const durationInFrames = Math.max(1, Math.round((firstSegment?.durationSeconds ?? 1) * 30));
 
   return (
     <AbsoluteFill style={CONTAINER_STYLE}>
       {firstSegment ? (
         <AbsoluteFill>
           {firstSegment.kind === 'video' ? (
-            <OffthreadVideo src={firstSegment.src} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <Video src={firstSegment.src} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           ) : (
             <Img src={firstSegment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           )}
