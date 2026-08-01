@@ -47,7 +47,7 @@ function publicAbsoluteUrl(fileName: string): string {
 }
 
 function servedAssetUrl(fileName: string): string {
-  return publicAbsoluteUrl(fileName);
+  return `${config.RUNPOD_BASE_URL}/files/generated/remotion/${encodeURIComponent(fileName)}`;
 }
 
 function isHttpUrl(value: string): boolean {
@@ -259,3 +259,4 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
 export async function getComposeJob(jobId: string): Promise<ComposeJobStatus | undefined> {
   return jobState.get(jobId);
 }
+
