@@ -15,7 +15,7 @@ export type ComposeSegment = {
 export type ComposeVideoInput = {
   title?: string;
   subtitle?: string;
-  segments: ComposeSegment[];
+  segments?: ComposeSegment[];
   narrationUrl?: string;
   musicUrl?: string;
 };
@@ -61,8 +61,12 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
   void (async () => {
     try {
       status.status = 'processing';
+      const segments = Array.isArray(input.segments) ? input.segments : [];
+      if (segments.length === 0) {
+        throw new Error('Compose job requires at least one segment.');
+      }
       const serveUrl = await getBundleUrl();
-      const durationInFrames = Math.max(1, Math.round(input.segments.reduce((sum, seg) => sum + seg.durationSeconds, 0) * 30));
+      const durationInFrames = Math.max(1, Math.round(segments.reduce((sum, seg) => sum + seg.durationSeconds, 0) * 30));
       await renderMedia({
         serveUrl,
         codec: 'h264',
@@ -72,9 +76,15 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
           height: 1920,
           fps: 30,
           durationInFrames,
-          defaultProps: input,
+          defaultProps: {
+            ...input,
+            segments,
+          },
         } as never,
-        inputProps: input,
+        inputProps: {
+          ...input,
+          segments,
+        },
         outputLocation: outputPath,
         overwrite: true,
         browserExecutable: null,

@@ -11,7 +11,7 @@ export type StorySegment = {
 export type StoryCompositionProps = {
   title?: string;
   subtitle?: string;
-  segments: StorySegment[];
+  segments?: StorySegment[];
   narrationUrl?: string;
   musicUrl?: string;
 };
@@ -36,7 +36,7 @@ function Overlay({ title, subtitle }: { title?: string; subtitle?: string }) {
   );
 }
 
-export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl }: StoryCompositionProps) {
+export function StoryComposition({ title, subtitle, segments = [], narrationUrl, musicUrl }: StoryCompositionProps) {
   let from = 0;
   return (
     <AbsoluteFill style={CONTAINER_STYLE}>
