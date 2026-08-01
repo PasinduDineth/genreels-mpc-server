@@ -1,6 +1,6 @@
-﻿import { bundle } from '@remotion/bundler';
+import { bundle } from '@remotion/bundler';
 import { renderMedia } from '@remotion/renderer';
-import { mkdir, writeFile, access, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, access, readFile, copyFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -46,6 +46,10 @@ function publicAbsoluteUrl(fileName: string): string {
   return `${base}/files/generated/remotion/${encodeURIComponent(fileName)}`;
 }
 
+function servedAssetUrl(fileName: string): string {
+  return publicAbsoluteUrl(fileName);
+}
+
 async function getBundleUrl(): Promise<string> {
   if (!bundlePromise) {
     bundlePromise = bundle({
@@ -65,10 +69,6 @@ async function downloadToFile(url: string, outputPath: string, jobId: string, la
   if (bytes.byteLength === 0) throw new Error('Downloaded asset was empty');
   await writeFile(outputPath, bytes);
   logger.info({ jobId, label, outputPath, byteLength: bytes.byteLength }, 'Compose asset downloaded');
-}
-
-function toFileUrl(filePath: string): string {
-  return `file://${filePath.replace(/\\/g, '/')}`;
 }
 
 function toDataUrl(bytes: Uint8Array, mimeType: string): string {
@@ -137,9 +137,9 @@ async function normalizeMediaAsset(inputUrl: string, jobId: string, kind: 'video
   await fetchOrCopyLocalAsset(inputUrl, rawPath, jobId, `${kind}:${index}:download`);
 
   if (kind === 'video') {
-    const outputPath = path.join(config.REMOTION_JOB_DIR, `${jobId}-${kind}-${index}.mp4`);
+    const outputPath = path.join(config.REMOTION_OUTPUT_DIR, `${jobId}-${kind}-${index}.mp4`);
     await transcodeVideoToBrowserFriendly(rawPath, outputPath, jobId, `${kind}:${index}:transcode`);
-    return toFileUrl(outputPath);
+    return servedAssetUrl(path.basename(outputPath));
   }
 
   if (kind === 'audio') {
@@ -150,7 +150,10 @@ async function normalizeMediaAsset(inputUrl: string, jobId: string, kind: 'video
     return dataUrl;
   }
 
-  return toFileUrl(rawPath);
+  const outputPath = path.join(config.REMOTION_OUTPUT_DIR, `${jobId}-${kind}-${index}${ext}`);
+  await copyFile(rawPath, outputPath);
+  logger.info({ jobId, label: `${kind}:${index}:copy`, outputPath }, 'Image asset copied to served output');
+  return servedAssetUrl(path.basename(outputPath));
 }
 
 async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Promise<ComposeVideoInput & { segments: ComposeSegment[] }> {
