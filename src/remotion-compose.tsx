@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { Audio, AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 
 export type StorySegment = {
@@ -14,6 +14,7 @@ export type StoryCompositionProps = {
   segments?: StorySegment[];
   narrationUrl?: string;
   musicUrl?: string;
+  debugLabel?: string;
 };
 
 const CONTAINER_STYLE: React.CSSProperties = {
@@ -36,7 +37,45 @@ function Overlay({ title, subtitle }: { title?: string; subtitle?: string }) {
   );
 }
 
-export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl }: StoryCompositionProps) {
+function DebugOverlay({
+  debugLabel,
+  segmentIndex,
+  segmentCount,
+  segmentSrc,
+  segmentKind,
+}: {
+  debugLabel?: string;
+  segmentIndex: number;
+  segmentCount: number;
+  segmentSrc: string;
+  segmentKind: StorySegment['kind'];
+}) {
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: 'flex-start',
+        alignItems: 'flex-start',
+        padding: '28px 32px',
+        pointerEvents: 'none',
+        fontSize: 18,
+        fontWeight: 700,
+        lineHeight: 1.35,
+        color: 'rgba(255,255,255,0.92)',
+        textShadow: '0 2px 10px rgba(0,0,0,0.8)',
+      }}
+    >
+      <div style={{ background: 'rgba(0,0,0,0.35)', padding: '12px 14px', borderRadius: 12, maxWidth: 980 }}>
+        {debugLabel ? <div>DEBUG: {debugLabel}</div> : null}
+        <div>
+          SEGMENT: {segmentIndex + 1}/{segmentCount} {segmentKind}
+        </div>
+        <div style={{ wordBreak: 'break-all' }}>{segmentSrc}</div>
+      </div>
+    </AbsoluteFill>
+  );
+}
+
+export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl, debugLabel }: StoryCompositionProps) {
   const safeSegments = Array.isArray(segments) ? segments : [];
   const sequences: React.ReactElement[] = [];
   let from = 0;
@@ -59,6 +98,15 @@ export function StoryComposition({ title, subtitle, segments, narrationUrl, musi
             <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 72px 220px', pointerEvents: 'none' }}>
               <div style={{ fontSize: 40, fontWeight: 700, lineHeight: 1.15, maxWidth: 920, textShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>{segment.caption}</div>
             </AbsoluteFill>
+          ) : null}
+          {debugLabel ? (
+            <DebugOverlay
+              debugLabel={debugLabel}
+              segmentIndex={index}
+              segmentCount={safeSegments.length}
+              segmentSrc={segment.src}
+              segmentKind={segment.kind}
+            />
           ) : null}
         </AbsoluteFill>
       </Sequence>,

@@ -50,6 +50,14 @@ function servedAssetUrl(fileName: string): string {
   return publicAbsoluteUrl(fileName);
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'http:' || new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 async function getBundleUrl(): Promise<string> {
   if (!bundlePromise) {
     bundlePromise = bundle({
@@ -163,8 +171,10 @@ async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Pro
   for (let i = 0; i < segments.length; i += 1) {
     const segment = segments[i];
     if (!segment?.src) throw new Error(`Segment ${i + 1} is missing src`);
-    logger.info({ jobId, index: i, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src }, 'Preparing compose segment');
-    localSegments.push({ ...segment, src: await normalizeMediaAsset(segment.src, jobId, segment.kind, i) });
+    logger.info({ jobId, index: i, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src, srcIsHttp: isHttpUrl(segment.src) }, 'Preparing compose segment');
+    const normalizedSrc = await normalizeMediaAsset(segment.src, jobId, segment.kind, i);
+    logger.info({ jobId, index: i, kind: segment.kind, normalizedSrc, normalizedSrcIsHttp: isHttpUrl(normalizedSrc) }, 'Compose segment normalized');
+    localSegments.push({ ...segment, src: normalizedSrc });
   }
   const prepared: ComposeVideoInput & { segments: ComposeSegment[] } = { ...input, segments: localSegments };
   if (input.narrationUrl) {
@@ -175,6 +185,16 @@ async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Pro
     prepared.musicUrl = await normalizeMediaAsset(input.musicUrl, jobId, 'audio', 1);
     logger.info({ jobId, musicIsDataUrl: prepared.musicUrl.startsWith('data:') }, 'Music audio attached');
   }
+  logger.info(
+    {
+      jobId,
+      segmentCount: prepared.segments.length,
+      segments: prepared.segments.map((segment, index) => ({ index, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src, caption: segment.caption ?? null })),
+      hasNarration: Boolean(prepared.narrationUrl),
+      hasMusic: Boolean(prepared.musicUrl),
+    },
+    'Compose input prepared',
+  );
   return prepared;
 }
 
@@ -192,7 +212,19 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
       const prepared = await prepareComposeInput(input, jobId);
       const serveUrl = await getBundleUrl();
       const durationInFrames = Math.max(1, Math.round(prepared.segments.reduce((sum, seg) => sum + seg.durationSeconds, 0) * 30));
-      logger.info({ jobId, outputPath, durationInFrames, segmentCount: prepared.segments.length, hasNarration: Boolean(prepared.narrationUrl), hasMusic: Boolean(prepared.musicUrl) }, 'Rendering compose job');
+      logger.info(
+        {
+          jobId,
+          outputPath,
+          durationInFrames,
+          segmentCount: prepared.segments.length,
+          segments: prepared.segments.map((segment, index) => ({ index, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src, caption: segment.caption ?? null })),
+          hasNarration: Boolean(prepared.narrationUrl),
+          hasMusic: Boolean(prepared.musicUrl),
+          serveUrl,
+        },
+        'Rendering compose job',
+      );
       await renderMedia({
         serveUrl,
         codec: 'h264',
@@ -204,7 +236,7 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
           durationInFrames,
           defaultProps: prepared,
         } as never,
-        inputProps: prepared,
+        inputProps: { ...prepared, debugLabel: jobId },
         outputLocation: outputPath,
         overwrite: true,
         browserExecutable: null,
