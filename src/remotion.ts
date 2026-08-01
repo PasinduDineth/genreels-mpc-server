@@ -36,7 +36,7 @@ async function ensureOutputDir() {
 }
 
 function publicAbsoluteUrl(fileName: string): string {
-  const base = config.MCP_PUBLIC_BASE_URL ?? config.RUNPOD_BASE_URL;
+  const base = config.RUNPOD_PUBLIC_BASE_URL ?? config.MCP_PUBLIC_BASE_URL ?? config.RUNPOD_BASE_URL;
   return `${base}/files/generated/remotion/${encodeURIComponent(fileName)}`;
 }
 
@@ -62,9 +62,7 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
     try {
       status.status = 'processing';
       const segments = Array.isArray(input.segments) ? input.segments : [];
-      if (segments.length === 0) {
-        throw new Error('Compose job requires at least one segment.');
-      }
+      if (segments.length === 0) throw new Error('Compose job requires at least one segment.');
       const serveUrl = await getBundleUrl();
       const durationInFrames = Math.max(1, Math.round(segments.reduce((sum, seg) => sum + seg.durationSeconds, 0) * 30));
       await renderMedia({

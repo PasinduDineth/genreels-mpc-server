@@ -1,5 +1,5 @@
 ﻿import React from 'react';
-import { Audio, AbsoluteFill, Img, Sequence, Video, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
+import { Audio, AbsoluteFill, Img, OffthreadVideo, Sequence, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 
 export type StorySegment = {
   src: string;
@@ -43,7 +43,7 @@ export function StoryComposition({ title, subtitle, segments = [], narrationUrl,
       {segments.map((segment, index) => {
         const durationInFrames = Math.max(1, Math.round(segment.durationSeconds * 30));
         const media = segment.kind === 'video' ? (
-          <Video src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted={Boolean(narrationUrl)} />
+          <OffthreadVideo src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted={Boolean(narrationUrl)} />
         ) : (
           <Img src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         );

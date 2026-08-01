@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -Eeuo pipefail
 
 # ==============================================================================
@@ -2558,6 +2558,11 @@ async def mcp_proxy(request: Request):
 async def connector_proxy(request: Request):
     # Neutral public alias for proxies that reserve or filter the literal
     # "/mcp" path. The local Node service still receives standard MCP traffic.
+
+@APP.api_route("/files/generated/remotion/{path:path}", methods=["GET"])
+async def remotion_files_proxy(request: Request, path: str):
+    return await generic_proxy(request, MCP_BASE, f"/files/generated/remotion/{path}")
+
     return await generic_proxy(request, MCP_BASE, "/mcp")
 
 
