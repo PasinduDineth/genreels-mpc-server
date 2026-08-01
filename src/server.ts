@@ -1,4 +1,4 @@
-﻿import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -325,11 +325,11 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
   if (req.method === "GET" && url.pathname === "/healthz") {
     try {
       const upstream = await health();
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(200, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ status: "ok", upstream }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      res.writeHead(503, { "content-type": "application/json" });
+      res.writeHead(503, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ status: "degraded", error: message }));
     }
     return;
@@ -342,10 +342,10 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     try {
       const info = await stat(filePath);
       if (!info.isFile() || path.extname(filename).toLowerCase() !== ".wav") throw new Error("Not a WAV file");
-      res.writeHead(200, { "content-type": "audio/wav", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable" });
+      res.writeHead(200, { "content-type": "audio/wav", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable", "access-control-allow-origin": "*" });
       createReadStream(filePath).pipe(res);
     } catch {
-      res.writeHead(404, { "content-type": "application/json" });
+      res.writeHead(404, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ detail: "Generated audio not found." }));
     }
     return;
@@ -358,10 +358,10 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     try {
       const info = await stat(filePath);
       if (!info.isFile() || path.extname(filename).toLowerCase() !== ".mp4") throw new Error("Not an MP4 file");
-      res.writeHead(200, { "content-type": "video/mp4", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable" });
+      res.writeHead(200, { "content-type": "video/mp4", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable", "access-control-allow-origin": "*" });
       createReadStream(filePath).pipe(res);
     } catch {
-      res.writeHead(404, { "content-type": "application/json" });
+      res.writeHead(404, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ detail: "Generated remotion video not found." }));
     }
     return;
@@ -414,3 +414,5 @@ const shutdown = (signal: string) => {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+
