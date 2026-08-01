@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -Eeuo pipefail
 
 # ==============================================================================
@@ -3136,8 +3136,13 @@ if [[ "$MCP_ENABLED" == "true" ]]; then
 
     log "Installing and building the MCP server..."
     npm --prefix "$MCP_DIR" ci >>"$INSTALL_LOG" 2>&1
+    rm -rf "$MCP_DIR/dist" >>"$INSTALL_LOG" 2>&1 || true
     npm --prefix "$MCP_DIR" run build >>"$INSTALL_LOG" 2>&1
 
+    MCP_BUILD_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || echo unknown)"
+    MCP_BUILD_COMMIT="$(git -C "$MCP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    log "MCP build ready: version=$MCP_BUILD_VERSION commit=$MCP_BUILD_COMMIT dist=$(realpath "$MCP_DIR/dist/server.js" 2>/dev/null || echo missing)"
+    echo "MCP build ready: version=$MCP_BUILD_VERSION commit=$MCP_BUILD_COMMIT dist=$(realpath "$MCP_DIR/dist/server.js" 2>/dev/null || echo missing)" >>"$MCP_LOG"
     if [[ -z "$MCP_PUBLIC_GATEWAY_URL" && -n "${RUNPOD_POD_ID:-}" ]]; then
       MCP_PUBLIC_GATEWAY_URL="https://${RUNPOD_POD_ID}-8000.proxy.runpod.net"
     fi
@@ -3622,3 +3627,4 @@ Logs:
 
 ===============================================================================
 EOF
+
