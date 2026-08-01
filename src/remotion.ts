@@ -1,9 +1,14 @@
 ﻿import { bundle } from '@remotion/bundler';
 import { renderMedia } from '@remotion/renderer';
+import { mkdir, writeFile, access } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
 import { config } from './config.js';
 import { logger } from './logger.js';
+
+const execFileAsync = promisify(execFile);
 
 export type ComposeSegment = {
   src: string;
@@ -52,12 +57,14 @@ async function getBundleUrl(): Promise<string> {
   return bundlePromise;
 }
 
-async function downloadToFile(url: string, outputPath: string): Promise<void> {
+async function downloadToFile(url: string, outputPath: string, jobId: string, label: string): Promise<void> {
+  logger.info({ jobId, label, url, outputPath }, 'Downloading compose asset');
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Failed to download asset (${response.status})`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength === 0) throw new Error('Downloaded asset was empty');
   await writeFile(outputPath, bytes);
+  logger.info({ jobId, label, outputPath, byteLength: bytes.byteLength }, 'Compose asset downloaded');
 }
 
 function toFileUrl(filePath: string): string {
@@ -74,12 +81,64 @@ function getExtensionFromUrl(url: string, fallback: string): string {
   }
 }
 
-async function prepareLocalAsset(inputUrl: string, jobId: string, kind: 'video' | 'image' | 'audio', index: number): Promise<string> {
+function localPathForGeneratedAsset(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    const filename = path.basename(parsed.pathname);
+    if (parsed.pathname.startsWith('/files/generated/videos/')) return path.join(config.VIDEO_OUTPUT_DIR, filename);
+    if (parsed.pathname.startsWith('/files/generated/audio/')) return path.join(config.AUDIO_OUTPUT_DIR, filename);
+    if (parsed.pathname.startsWith('/files/generated/remotion/')) return path.join(config.REMOTION_OUTPUT_DIR, filename);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOrCopyLocalAsset(inputUrl: string, outputPath: string, jobId: string, label: string): Promise<void> {
+  const localPath = localPathForGeneratedAsset(inputUrl);
+  if (localPath) {
+    try {
+      await access(localPath, fsConstants.R_OK);
+      await execFileAsync('cp', ['-f', localPath, outputPath]);
+      logger.info({ jobId, label, localPath, outputPath }, 'Copied local generated asset');
+      return;
+    } catch {
+      logger.info({ jobId, label, localPath }, 'Local generated asset missing, falling back to network download');
+    }
+  }
+  await downloadToFile(inputUrl, outputPath, jobId, label);
+}
+
+async function transcodeVideoToBrowserFriendly(inputPath: string, outputPath: string, jobId: string, label: string): Promise<void> {
+  logger.info({ jobId, label, inputPath, outputPath }, 'Transcoding video asset');
+  await execFileAsync('ffmpeg', [
+    '-y',
+    '-i', inputPath,
+    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p',
+    '-r', '30',
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '20',
+    '-movflags', '+faststart',
+    '-an',
+    outputPath,
+  ]);
+  logger.info({ jobId, label, inputPath, outputPath }, 'Video asset transcoded');
+}
+
+async function normalizeMediaAsset(inputUrl: string, jobId: string, kind: 'video' | 'image' | 'audio', index: number): Promise<string> {
   const ext = getExtensionFromUrl(inputUrl, kind === 'image' ? '.png' : kind === 'video' ? '.mp4' : '.wav');
-  const filename = `${jobId}-${kind}-${index}${ext}`;
-  const outputPath = path.join(config.REMOTION_JOB_DIR, filename);
-  await downloadToFile(inputUrl, outputPath);
-  return toFileUrl(outputPath);
+  const rawFilename = `${jobId}-${kind}-${index}-raw${ext}`;
+  const rawPath = path.join(config.REMOTION_JOB_DIR, rawFilename);
+  await fetchOrCopyLocalAsset(inputUrl, rawPath, jobId, `${kind}:${index}:download`);
+
+  if (kind === 'video') {
+    const outputPath = path.join(config.REMOTION_JOB_DIR, `${jobId}-${kind}-${index}.mp4`);
+    await transcodeVideoToBrowserFriendly(rawPath, outputPath, jobId, `${kind}:${index}:transcode`);
+    return toFileUrl(outputPath);
+  }
+
+  return toFileUrl(rawPath);
 }
 
 async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Promise<ComposeVideoInput & { segments: ComposeSegment[] }> {
@@ -89,14 +148,12 @@ async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Pro
   for (let i = 0; i < segments.length; i += 1) {
     const segment = segments[i];
     if (!segment?.src) throw new Error(`Segment ${i + 1} is missing src`);
-    localSegments.push({
-      ...segment,
-      src: await prepareLocalAsset(segment.src, jobId, segment.kind, i),
-    });
+    logger.info({ jobId, index: i, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src }, 'Preparing compose segment');
+    localSegments.push({ ...segment, src: await normalizeMediaAsset(segment.src, jobId, segment.kind, i) });
   }
   const prepared: ComposeVideoInput & { segments: ComposeSegment[] } = { ...input, segments: localSegments };
-  if (input.narrationUrl) prepared.narrationUrl = await prepareLocalAsset(input.narrationUrl, jobId, 'audio', 0);
-  if (input.musicUrl) prepared.musicUrl = await prepareLocalAsset(input.musicUrl, jobId, 'audio', 1);
+  if (input.narrationUrl) prepared.narrationUrl = await normalizeMediaAsset(input.narrationUrl, jobId, 'audio', 0);
+  if (input.musicUrl) prepared.musicUrl = await normalizeMediaAsset(input.musicUrl, jobId, 'audio', 1);
   return prepared;
 }
 
@@ -110,9 +167,11 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
   void (async () => {
     try {
       status.status = 'processing';
+      logger.info({ jobId, title: input.title, subtitle: input.subtitle, segmentCount: input.segments?.length ?? 0 }, 'Compose job started');
       const prepared = await prepareComposeInput(input, jobId);
       const serveUrl = await getBundleUrl();
       const durationInFrames = Math.max(1, Math.round(prepared.segments.reduce((sum, seg) => sum + seg.durationSeconds, 0) * 30));
+      logger.info({ jobId, outputPath, durationInFrames, segmentCount: prepared.segments.length, hasNarration: Boolean(prepared.narrationUrl), hasMusic: Boolean(prepared.musicUrl) }, 'Rendering compose job');
       await renderMedia({
         serveUrl,
         codec: 'h264',
@@ -132,6 +191,7 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
       status.status = 'completed';
       status.outputPath = outputPath;
       status.videoUrl = publicAbsoluteUrl(path.basename(outputPath));
+      logger.info({ jobId, outputPath, videoUrl: status.videoUrl }, 'Compose job completed');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       status.status = 'failed';

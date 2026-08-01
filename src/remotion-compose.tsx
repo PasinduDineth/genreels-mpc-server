@@ -36,35 +36,33 @@ function Overlay({ title, subtitle }: { title?: string; subtitle?: string }) {
   );
 }
 
-export function StoryComposition({ title, subtitle, segments = [], narrationUrl, musicUrl }: StoryCompositionProps) {
+export function StoryComposition({ title, subtitle, segments, narrationUrl, musicUrl }: StoryCompositionProps) {
+  const safeSegments = Array.isArray(segments) ? segments : [];
   let from = 0;
   return (
     <AbsoluteFill style={CONTAINER_STYLE}>
-      {segments.map((segment, index) => {
+      {safeSegments.map((segment, index) => {
         const durationInFrames = Math.max(1, Math.round(segment.durationSeconds * 30));
         const media = segment.kind === 'video' ? (
           <OffthreadVideo src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted={Boolean(narrationUrl)} />
         ) : (
           <Img src={segment.src} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         );
-        const block = (
-          <AbsoluteFill>
-            {media}
-            <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(5,8,22,0.8), rgba(5,8,22,0.1) 45%, rgba(5,8,22,0.25))' }} />
-            {segment.caption ? (
-              <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 72px 220px', pointerEvents: 'none' }}>
-                <div style={{ fontSize: 40, fontWeight: 700, lineHeight: 1.15, maxWidth: 920, textShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>{segment.caption}</div>
-              </AbsoluteFill>
-            ) : null}
-          </AbsoluteFill>
-        );
-        const sequence = (
+        const node = (
           <Sequence key={index} from={from} durationInFrames={durationInFrames}>
-            {block}
+            <AbsoluteFill>
+              {media}
+              <AbsoluteFill style={{ background: 'linear-gradient(to top, rgba(5,8,22,0.8), rgba(5,8,22,0.1) 45%, rgba(5,8,22,0.25))' }} />
+              {segment.caption ? (
+                <AbsoluteFill style={{ justifyContent: 'flex-end', padding: '0 72px 220px', pointerEvents: 'none' }}>
+                  <div style={{ fontSize: 40, fontWeight: 700, lineHeight: 1.15, maxWidth: 920, textShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>{segment.caption}</div>
+                </AbsoluteFill>
+              ) : null}
+            </AbsoluteFill>
           </Sequence>
         );
         from += durationInFrames;
-        return sequence;
+        return node;
       })}
       {title || subtitle ? <Overlay title={title} subtitle={subtitle} /> : null}
       {narrationUrl ? <Audio src={narrationUrl} /> : null}
