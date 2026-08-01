@@ -1,6 +1,6 @@
 ﻿import { registerRoot, Composition } from 'remotion';
 import { z } from 'zod';
-import { StoryComposition } from './remotion-compose.js';
+import { StoryComposition } from './remotion-compose';
 
 const schema = z.object({
   title: z.string().optional(),
