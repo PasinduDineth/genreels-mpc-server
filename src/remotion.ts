@@ -152,8 +152,14 @@ async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Pro
     localSegments.push({ ...segment, src: await normalizeMediaAsset(segment.src, jobId, segment.kind, i) });
   }
   const prepared: ComposeVideoInput & { segments: ComposeSegment[] } = { ...input, segments: localSegments };
-  if (input.narrationUrl) prepared.narrationUrl = await normalizeMediaAsset(input.narrationUrl, jobId, 'audio', 0);
-  if (input.musicUrl) prepared.musicUrl = await normalizeMediaAsset(input.musicUrl, jobId, 'audio', 1);
+  if (input.narrationUrl) {
+    prepared.narrationUrl = await normalizeMediaAsset(input.narrationUrl, jobId, 'audio', 0);
+    logger.info({ jobId, narrationUrl: prepared.narrationUrl }, 'Narration audio attached');
+  }
+  if (input.musicUrl) {
+    prepared.musicUrl = await normalizeMediaAsset(input.musicUrl, jobId, 'audio', 1);
+    logger.info({ jobId, musicUrl: prepared.musicUrl }, 'Music audio attached');
+  }
   return prepared;
 }
 
@@ -167,7 +173,7 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
   void (async () => {
     try {
       status.status = 'processing';
-      logger.info({ jobId, title: input.title, subtitle: input.subtitle, segmentCount: input.segments?.length ?? 0 }, 'Compose job started');
+      logger.info({ jobId, title: input.title, subtitle: input.subtitle, segmentCount: input.segments?.length ?? 0, hasNarration: Boolean(input.narrationUrl), hasMusic: Boolean(input.musicUrl) }, 'Compose job started');
       const prepared = await prepareComposeInput(input, jobId);
       const serveUrl = await getBundleUrl();
       const durationInFrames = Math.max(1, Math.round(prepared.segments.reduce((sum, seg) => sum + seg.durationSeconds, 0) * 30));
