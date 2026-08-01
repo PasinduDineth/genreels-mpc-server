@@ -306,6 +306,46 @@ function setCors(res: ServerResponse): void {
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 }
 
+async function sendFileWithRange(req: IncomingMessage, res: ServerResponse, filePath: string, contentType: string, filename: string): Promise<void> {
+  const info = await stat(filePath);
+  if (!info.isFile()) throw new Error('Not a file');
+  const rangeHeader = req.headers.range;
+  if (typeof rangeHeader === 'string' && rangeHeader.startsWith('bytes=')) {
+    const [startRaw, endRaw] = rangeHeader.slice('bytes='.length).split('-');
+    const start = Number.parseInt(startRaw, 10);
+    const end = endRaw ? Number.parseInt(endRaw, 10) : info.size - 1;
+    if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || end < start || end >= info.size) {
+      res.writeHead(416, {
+        'content-range': `bytes */${info.size}`,
+        'access-control-allow-origin': '*',
+      });
+      res.end();
+      return;
+    }
+    const chunkSize = end - start + 1;
+    res.writeHead(206, {
+      'content-type': contentType,
+      'content-length': chunkSize,
+      'content-range': `bytes ${start}-${end}/${info.size}`,
+      'accept-ranges': 'bytes',
+      'content-disposition': `inline; filename="${filename}"`,
+      'cache-control': 'public, max-age=31536000, immutable',
+      'access-control-allow-origin': '*',
+    });
+    createReadStream(filePath, { start, end }).pipe(res);
+    return;
+  }
+  res.writeHead(200, {
+    'content-type': contentType,
+    'content-length': info.size,
+    'accept-ranges': 'bytes',
+    'content-disposition': `inline; filename="${filename}"`,
+    'cache-control': 'public, max-age=31536000, immutable',
+    'access-control-allow-origin': '*',
+  });
+  createReadStream(filePath).pipe(res);
+}
+
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const requestId = crypto.randomUUID();
   const started = Date.now();
@@ -340,10 +380,8 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     const filename = path.basename(decodeURIComponent(url.pathname.slice(audioPrefix.length)));
     const filePath = path.join(config.AUDIO_OUTPUT_DIR, filename);
     try {
-      const info = await stat(filePath);
-      if (!info.isFile() || path.extname(filename).toLowerCase() !== ".wav") throw new Error("Not a WAV file");
-      res.writeHead(200, { "content-type": "audio/wav", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable", "access-control-allow-origin": "*" });
-      createReadStream(filePath).pipe(res);
+      if (path.extname(filename).toLowerCase() !== ".wav") throw new Error("Not a WAV file");
+      await sendFileWithRange(req, res, filePath, "audio/wav", filename);
     } catch {
       res.writeHead(404, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ detail: "Generated audio not found." }));
@@ -356,10 +394,8 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     const filename = path.basename(decodeURIComponent(url.pathname.slice(remotionPrefix.length)));
     const filePath = path.join(config.REMOTION_OUTPUT_DIR, filename);
     try {
-      const info = await stat(filePath);
-      if (!info.isFile() || path.extname(filename).toLowerCase() !== ".mp4") throw new Error("Not an MP4 file");
-      res.writeHead(200, { "content-type": "video/mp4", "content-length": info.size, "content-disposition": `inline; filename="${filename}"`, "cache-control": "public, max-age=31536000, immutable", "access-control-allow-origin": "*" });
-      createReadStream(filePath).pipe(res);
+      if (path.extname(filename).toLowerCase() !== ".mp4") throw new Error("Not an MP4 file");
+      await sendFileWithRange(req, res, filePath, "video/mp4", filename);
     } catch {
       res.writeHead(404, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ detail: "Generated remotion video not found." }));
