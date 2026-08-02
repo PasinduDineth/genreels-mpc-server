@@ -1,12 +1,13 @@
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
-import { mkdir, writeFile, access, readFile, copyFile } from 'node:fs/promises';
+import { access, copyFile, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { config } from './config.js';
 import { logger } from './logger.js';
+import { transcribeNarrationAudio } from './whisper.service.js';
 
 const execFileAsync = promisify(execFile);
 const COMPOSITION_FPS = 24;
@@ -17,10 +18,19 @@ export type ComposeSegment = {
   kind: 'video' | 'image';
 };
 
+export type ComposeCaption = {
+  startMs: number;
+  endMs: number;
+  text: string;
+  timestampMs?: number | null;
+  confidence?: number | null;
+};
+
 export type ComposeVideoInput = {
   segments?: ComposeSegment[];
   narrationUrl?: string;
   musicUrl?: string;
+  captions?: ComposeCaption[];
 };
 
 export type ComposeJobStatus = {
@@ -162,6 +172,14 @@ async function normalizeMediaAsset(inputUrl: string, jobId: string, kind: 'video
   return servedAssetUrl(path.basename(outputPath));
 }
 
+async function getNarrationAudioPath(inputUrl: string, jobId: string): Promise<string> {
+  const ext = getExtensionFromUrl(inputUrl, '.wav');
+  const rawFilename = `${jobId}-narration-raw${ext}`;
+  const rawPath = path.join(config.REMOTION_JOB_DIR, rawFilename);
+  await fetchOrCopyLocalAsset(inputUrl, rawPath, jobId, 'narration:download');
+  return rawPath;
+}
+
 async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Promise<ComposeVideoInput & { segments: ComposeSegment[] }> {
   const segments = Array.isArray(input.segments) ? input.segments : [];
   if (segments.length === 0) throw new Error('Compose job requires at least one segment.');
@@ -183,16 +201,18 @@ async function prepareComposeInput(input: ComposeVideoInput, jobId: string): Pro
     prepared.musicUrl = await normalizeMediaAsset(input.musicUrl, jobId, 'audio', 1);
     logger.info({ jobId, musicIsDataUrl: prepared.musicUrl.startsWith('data:') }, 'Music audio attached');
   }
-  logger.info(
-    {
-      jobId,
-      segmentCount: prepared.segments.length,
-      segments: prepared.segments.map((segment, index) => ({ index, kind: segment.kind, durationSeconds: segment.durationSeconds, src: segment.src })),
-      hasNarration: Boolean(prepared.narrationUrl),
-      hasMusic: Boolean(prepared.musicUrl),
-    },
-    'Compose input prepared',
-  );
+  if ((!prepared.captions || prepared.captions.length === 0) && input.narrationUrl) {
+    const narrationPath = await getNarrationAudioPath(input.narrationUrl, jobId);
+    const captionOutputPath = path.join(config.REMOTION_JOB_DIR, `${jobId}-captions.json`);
+    const generatedCaptions = await transcribeNarrationAudio({ audioPath: narrationPath, captionOutputPath });
+    prepared.captions = generatedCaptions.map((caption) => ({
+      ...caption,
+      confidence: typeof caption.confidence === 'number' ? caption.confidence : null,
+      timestampMs: typeof caption.timestampMs === 'number' ? caption.timestampMs : null,
+    }));
+    logger.info({ jobId, captionCount: prepared.captions.length }, 'Narration captions generated');
+  }
+  logger.info({ jobId, segmentCount: prepared.segments.length, hasNarration: Boolean(prepared.narrationUrl), hasMusic: Boolean(prepared.musicUrl), captionCount: prepared.captions?.length ?? 0 }, 'Compose input prepared');
   return prepared;
 }
 
@@ -209,73 +229,28 @@ export async function submitComposeJob(input: ComposeVideoInput): Promise<Compos
       logger.info({ jobId, segmentCount: input.segments?.length ?? 0, hasNarration: Boolean(input.narrationUrl), hasMusic: Boolean(input.musicUrl) }, 'Compose job started');
       const prepared = await prepareComposeInput(input, jobId);
       const serveUrl = await getBundleUrl();
-      const segmentFrames = prepared.segments.map((segment, index) => ({
-        index,
-        kind: segment.kind,
-        durationSeconds: segment.durationSeconds,
-        durationInFrames: Math.max(1, Math.round(segment.durationSeconds * COMPOSITION_FPS)),
-        src: segment.src,
-      }));
-      const durationInFrames = Math.max(1, segmentFrames.reduce((sum, seg) => sum + seg.durationInFrames, 0));
-      logger.info(
-        {
-          jobId,
-          outputPath,
-          durationInFrames,
-          segmentCount: prepared.segments.length,
-          segmentFrames,
-          narrationUrl: prepared.narrationUrl ?? null,
-          musicUrl: prepared.musicUrl ?? null,
-          serveUrl,
-        },
-        'Rendering compose job',
-      );
+      const segmentFrames = prepared.segments.map((segment) => Math.max(1, Math.round(segment.durationSeconds * COMPOSITION_FPS)));
+      const durationInFrames = Math.max(1, segmentFrames.reduce((sum, value) => sum + value, 0));
       const inputProps = prepared;
-      const selectedComposition = await selectComposition({
-        serveUrl,
-        id: 'StoryComposition',
-        inputProps,
-      });
+      const selectedComposition = await selectComposition({ serveUrl, id: 'StoryComposition', inputProps });
       const composition = { ...selectedComposition, durationInFrames };
-      logger.info(
-        {
-          jobId,
-          selectedComposition: {
-            id: composition.id,
-            width: composition.width,
-            height: composition.height,
-            fps: composition.fps,
-            durationInFrames: composition.durationInFrames,
-          },
-        },
-        'Remotion composition selected',
-      );
-      await renderMedia({
-        serveUrl,
-        codec: 'h264',
-        composition,
-        inputProps,
-        outputLocation: outputPath,
-        overwrite: true,
-        browserExecutable: null,
-      });
+      await renderMedia({ serveUrl, codec: 'h264', composition, inputProps, outputLocation: outputPath, overwrite: true, browserExecutable: null });
+      const videoUrl = publicAbsoluteUrl(path.basename(outputPath));
       status.status = 'completed';
       status.outputPath = outputPath;
-      status.videoUrl = publicAbsoluteUrl(path.basename(outputPath));
-      logger.info({ jobId, outputPath, videoUrl: status.videoUrl }, 'Compose job completed');
+      status.videoUrl = videoUrl;
+      jobState.set(jobId, status);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       status.status = 'failed';
-      status.error = message;
-      logger.error({ err: error, jobId }, 'Remotion compose job failed');
+      status.error = error instanceof Error ? error.message : String(error);
+      jobState.set(jobId, status);
     }
   })();
 
   return status;
 }
 
-export async function getComposeJob(jobId: string): Promise<ComposeJobStatus | undefined> {
-  return jobState.get(jobId);
+export async function getComposeJob(jobId: string): Promise<ComposeJobStatus | null> {
+  return jobState.get(jobId) ?? null;
 }
-
 

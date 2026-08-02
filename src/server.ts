@@ -64,6 +64,14 @@ const openAiImageFileSchema = z.union([
   z.string().describe("ChatGPT platform file reference; the client replaces this with a downloadable file object."),
 ]).optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation.");
 
+const captionSchema = z.object({
+  text: z.string(),
+  startMs: z.number(),
+  endMs: z.number(),
+  timestampMs: z.number().optional(),
+  confidence: z.number().optional(),
+});
+
 const videoFrameCountSchema = z.number().int().min(25).max(121).refine((value) => (value - 1) % 4 === 0, "num_frames must follow 4n + 1").default(121).describe("Number of generated frames. Must follow 4n + 1. Use 61 with 12 FPS for a fast 5-second clip, 81 with 16 FPS for balanced, or 121 with 24 FPS for quality.");
 
 const videoFpsSchema = z.number().int().min(8).max(24).default(24).describe("Output frames per second. Approximate duration is (num_frames - 1) / fps seconds.");
@@ -111,7 +119,7 @@ function createMcpServer(): McpServer {
     { name: "runpod-ai-studio", version: "1.6.0" },
     {
       instructions:
-        "Use get_runpod_status before diagnosing availability or to recover active video job IDs. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL and immediately returns a job ID. Poll check_video_job with that ID until completion. generate_video_and_wait is a backward-compatible asynchronous alias and also returns immediately; no video tool waits inside one MCP request. compose_video_story assembles clips, narration, and music into a 9:16 Remotion render and returns a job ID immediately.",
+        "Use get_runpod_status before diagnosing availability or to recover active video job IDs. generate_speech creates Qwen3-TTS audio. generate_video_from_image submits a 5-second portrait video job from a ChatGPT-generated/uploaded image or a public image URL and immediately returns a job ID. Poll check_video_job with that ID until completion. generate_video_and_wait is a backward-compatible asynchronous alias and also returns immediately; no video tool waits inside one MCP request. compose_video_story assembles clips, narration, music, and optional captions into a 9:16 Remotion render and returns a job ID immediately.",
     },
   );
 
@@ -224,10 +232,10 @@ function createMcpServer(): McpServer {
   server.registerTool(
     "generate_video_and_wait",
     {
-      title: "Generate 5-second video (legacy async alias)",
+      title: "Generate 5-second video from image",
       description:
-        "Backward-compatible alias for generate_video_from_image. Submit a 5-second HunyuanVideo job from a ChatGPT-generated/uploaded image or public image URL and return the job ID immediately. This tool does not wait, because video rendering can exceed MCP request timeouts. Poll check_video_job with the returned job_id until completion.",
-      inputSchema: { image_file: openAiImageFileSchema, image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."), prompt: z.string().min(1).max(4000), steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8), num_frames: videoFrameCountSchema, fps: videoFpsSchema, seed: z.number().int().nonnegative().optional() },
+        "Backward-compatible alias for generate_video_from_image. It still returns immediately with a job ID and does not wait for completion.",
+      inputSchema: { image_file: openAiImageFileSchema, image_url: z.string().url().optional(), prompt: z.string().min(1).max(4000), steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8), num_frames: videoFrameCountSchema, fps: videoFpsSchema, seed: z.number().int().nonnegative().optional() },
       _meta: { "openai/fileParams": ["image_file"] },
     },
     async (args) => {
@@ -256,17 +264,18 @@ function createMcpServer(): McpServer {
     {
       title: "Compose 9:16 narrative short",
       description:
-        "Assemble multiple generated clips, optional narration, and optional music into a single 9:16 TikTok-style MP4 using Remotion. The tool returns immediately with a job ID; poll check_compose_job for the final video_url.",
+        "Assemble multiple generated clips, optional narration, optional captions, and optional music into a single 9:16 TikTok-style MP4 using Remotion. The tool returns immediately with a job ID; poll check_compose_job for the final video_url.",
       inputSchema: {
         narration_url: z.string().url().optional(),
         music_url: z.string().url().optional(),
+        captions: z.array(captionSchema).optional(),
         segments: z.array(z.object({ src: z.string().url(), duration_seconds: z.number().positive().max(30), kind: z.union([z.literal("video"), z.literal("image")]) })).min(1).max(30),
       },
     },
     async (args) => {
       try {
-        logger.info({ tool: "compose_video_story", segmentCount: args.segments.length, hasNarration: Boolean(args.narration_url), hasMusic: Boolean(args.music_url) }, "MCP tool invoked");
-        const result = await submitComposeJob({ narrationUrl: args.narration_url, musicUrl: args.music_url, segments: args.segments.map((segment) => ({ src: segment.src, durationSeconds: segment.duration_seconds, kind: segment.kind })) });
+        logger.info({ tool: "compose_video_story", segmentCount: args.segments.length, hasNarration: Boolean(args.narration_url), hasMusic: Boolean(args.music_url), captionCount: args.captions?.length ?? 0 }, "MCP tool invoked");
+        const result = await submitComposeJob({ captions: args.captions, narrationUrl: args.narration_url, musicUrl: args.music_url, segments: args.segments.map((segment) => ({ src: segment.src, durationSeconds: segment.duration_seconds, kind: segment.kind })) });
         return textResult(`Compose job accepted. Job ID: ${result.jobId}`, { ok: true, type: "compose_job", ...result });
       } catch (error) {
         return errorResult(error);
@@ -448,5 +457,3 @@ const shutdown = (signal: string) => {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
-
-

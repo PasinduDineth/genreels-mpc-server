@@ -1,0 +1,1 @@
+export {loadFont, fontFamily as BoldFont} from '@remotion/google-fonts/Bangers';

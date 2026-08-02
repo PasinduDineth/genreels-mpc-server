@@ -2,9 +2,18 @@ import { registerRoot, Composition } from 'remotion';
 import { z } from 'zod';
 import { StoryComposition } from './remotion-compose';
 
+const captionSchema = z.object({
+  text: z.string(),
+  startMs: z.number(),
+  endMs: z.number(),
+  timestampMs: z.number().optional(),
+  confidence: z.number().optional(),
+});
+
 const schema = z.object({
   narrationUrl: z.string().url().optional(),
   musicUrl: z.string().url().optional(),
+  captions: z.array(captionSchema).optional(),
   segments: z.array(z.object({
     src: z.string().url(),
     durationSeconds: z.number().positive(),

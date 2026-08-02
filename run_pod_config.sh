@@ -245,6 +245,7 @@ run_logged "Updating apt package metadata..." apt-get update -qq
 run_logged "Installing base packages..." \
   apt-get install -y --no-install-recommends \
     ca-certificates curl git ffmpeg sox libsox-fmt-all jq procps iproute2 \
+    build-essential \
     python3 python3-venv python3-pip \
     libnss3 libnspr4 libatk-bridge2.0-0 libatk1.0-0 libgtk-3-0 \
     libxkbcommon0 libgbm1 libasound2t64
