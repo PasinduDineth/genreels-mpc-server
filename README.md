@@ -113,7 +113,7 @@ Recommended test order:
 Video tools accept `num_frames` and `fps`. Frame counts must follow `4n + 1`:
 
 - Fast 5 seconds: `num_frames: 61`, `fps: 12`, `steps: 4`
-- Balanced 5 seconds: `num_frames: 81`, `fps: 16`
+- Smooth and fast: `num_frames: 81`, `fps: 16`, `steps: 4`
 - Quality 5 seconds: `num_frames: 121`, `fps: 24`
 
 The video backend accepts 25–121 frames (following `4n + 1`) and 8–24 FPS; duration is determined by the selected frame count and FPS.

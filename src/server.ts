@@ -72,9 +72,9 @@ const captionSchema = z.object({
   confidence: z.number().optional(),
 });
 
-const videoFrameCountSchema = z.number().int().min(25).max(121).refine((value) => (value - 1) % 4 === 0, "num_frames must follow 4n + 1").default(121).describe("Number of generated frames. Must follow 4n + 1. Use 61 with 12 FPS for a fast 5-second clip, 81 with 16 FPS for balanced, or 121 with 24 FPS for quality.");
+const videoFrameCountSchema = z.number().int().min(25).max(121).refine((value) => (value - 1) % 4 === 0, "num_frames must follow 4n + 1").default(81).describe("Number of generated frames. Must follow 4n + 1. Use 61 with 12 FPS for a fast 5-second clip, 81 with 16 FPS for smooth balanced results, or 121 with 24 FPS for quality.");
 
-const videoFpsSchema = z.number().int().min(8).max(24).default(24).describe("Output frames per second. Approximate duration is (num_frames - 1) / fps seconds.");
+const videoFpsSchema = z.number().int().min(8).max(24).default(16).describe("Output frames per second. Approximate duration is (num_frames - 1) / fps seconds.");
 
 function getVideoImageUrl(args: { image_url?: string; image_file?: unknown }): { imageUrl: string; source: "url" | "chatgpt_file"; fileId?: string } {
   if (args.image_file !== undefined && args.image_file !== null) {
