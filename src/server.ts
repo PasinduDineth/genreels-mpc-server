@@ -7,7 +7,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
-import { generateSpeech, getStatus, getVideoJob, health, startVideo } from "./runpod.js";
+import { generateSpeech, getStatus, getVideoJob, health, startVideo, waitForVideo } from "./runpod.js";
 import { getComposeJob, submitComposeJob } from "./remotion.js";
 
 const MCP_PATH = "/mcp";
@@ -16,6 +16,137 @@ const MCP_CONNECTOR_PATH = "/connector";
 const MCP_POST_PATHS = new Set(["/", MCP_PATH, MCP_ALTERNATE_PATH, MCP_CONNECTOR_PATH]);
 const activeVideoJobs = new Set<string>();
 let generationOperationInProgress = false;
+let batchGenerationInProgress = false;
+
+type BatchVideoItem = {
+  imageUrl: string;
+  prompt: string;
+  steps: 4 | 8 | 12;
+  numFrames: number;
+  fps: number;
+  seed?: number;
+};
+
+type BatchVideoItemState = {
+  index: number;
+  imageUrl: string;
+  prompt: string;
+  steps: 4 | 8 | 12;
+  numFrames: number;
+  fps: number;
+  seed?: number;
+  status: "queued" | "processing" | "completed" | "failed";
+  jobId?: string;
+  statusUrl?: string;
+  videoUrl?: string;
+  error?: string;
+};
+
+type BatchVideoJob = {
+  batchId: string;
+  status: "queued" | "processing" | "completed" | "failed" | "partial_completed";
+  createdAt: string;
+  updatedAt: string;
+  totalItems: number;
+  completedItems: number;
+  failedItems: number;
+  items: BatchVideoItemState[];
+  error?: string;
+};
+
+const batchVideoJobs = new Map<string, BatchVideoJob>();
+
+function touchBatchJob(batch: BatchVideoJob): void {
+  batch.updatedAt = new Date().toISOString();
+  batchVideoJobs.set(batch.batchId, batch);
+}
+
+function createBatchVideoJob(items: BatchVideoItem[]): BatchVideoJob {
+  const batchId = crypto.randomUUID().replace(/-/g, "");
+  const now = new Date().toISOString();
+  const batch: BatchVideoJob = {
+    batchId,
+    status: "queued",
+    createdAt: now,
+    updatedAt: now,
+    totalItems: items.length,
+    completedItems: 0,
+    failedItems: 0,
+    items: items.map((item, index) => ({
+      index,
+      imageUrl: item.imageUrl,
+      prompt: item.prompt,
+      steps: item.steps,
+      numFrames: item.numFrames,
+      fps: item.fps,
+      ...(item.seed !== undefined ? { seed: item.seed } : {}),
+      status: "queued",
+    })),
+  };
+  batchVideoJobs.set(batchId, batch);
+  return batch;
+}
+
+function summarizeBatchStatus(batch: BatchVideoJob): void {
+  batch.completedItems = batch.items.filter((item) => item.status === "completed").length;
+  batch.failedItems = batch.items.filter((item) => item.status === "failed").length;
+  if (batch.items.every((item) => item.status === "completed")) {
+    batch.status = "completed";
+  } else if (batch.items.some((item) => item.status === "failed") && batch.items.some((item) => item.status === "completed")) {
+    batch.status = "partial_completed";
+  } else if (batch.items.some((item) => item.status === "failed")) {
+    batch.status = "failed";
+  } else if (batch.items.some((item) => item.status === "processing")) {
+    batch.status = "processing";
+  } else {
+    batch.status = "queued";
+  }
+  batch.updatedAt = new Date().toISOString();
+  batchVideoJobs.set(batch.batchId, batch);
+}
+
+async function processBatchVideoJob(batchId: string): Promise<void> {
+  const batch = batchVideoJobs.get(batchId);
+  if (!batch) return;
+  batch.status = "processing";
+  touchBatchJob(batch);
+
+  try {
+    for (const item of batch.items) {
+      item.status = "processing";
+      touchBatchJob(batch);
+
+      try {
+        const submitted = await startVideo({
+          imageUrl: item.imageUrl,
+          prompt: item.prompt,
+          steps: item.steps,
+          numFrames: item.numFrames,
+          fps: item.fps,
+          seed: item.seed,
+        });
+        item.jobId = submitted.job_id;
+        item.statusUrl = submitted.status_url_absolute;
+        touchBatchJob(batch);
+        activeVideoJobs.add(submitted.job_id);
+
+        const completed = await waitForVideo(submitted.job_id);
+        item.videoUrl = completed.video_url;
+        item.status = "completed";
+        activeVideoJobs.delete(submitted.job_id);
+        touchBatchJob(batch);
+      } catch (error) {
+        item.status = "failed";
+        item.error = error instanceof Error ? error.message : String(error);
+        if (item.jobId) activeVideoJobs.delete(item.jobId);
+        touchBatchJob(batch);
+      }
+      summarizeBatchStatus(batch);
+    }
+  } finally {
+    batchGenerationInProgress = false;
+  }
+}
 
 async function refreshActiveVideoJobs(): Promise<string[]> {
   try {
@@ -141,7 +272,7 @@ function createMcpServer(): McpServer {
       let acquiredGenerationLock = false;
       try {
         await refreshActiveVideoJobs();
-        if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
+        if (generationOperationInProgress || batchGenerationInProgress) throw new Error("Another generation request or batch is currently being prepared.");
         if (activeVideoJobs.size > 0) {
           throw new Error("Cannot switch to TTS mode while a video job is active. Check the video job until it completes or fails.");
         }
@@ -191,7 +322,7 @@ function createMcpServer(): McpServer {
       let acquiredGenerationLock = false;
       try {
         await refreshActiveVideoJobs();
-        if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
+        if (generationOperationInProgress || batchGenerationInProgress) throw new Error("Another generation request or batch is currently being prepared.");
         if (activeVideoJobs.size > 0) throw new Error("A video job is already active. Check that job before submitting another one.");
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
@@ -242,7 +373,7 @@ function createMcpServer(): McpServer {
       let acquiredGenerationLock = false;
       try {
         await refreshActiveVideoJobs();
-        if (generationOperationInProgress) throw new Error("Another generation request is currently being prepared.");
+        if (generationOperationInProgress || batchGenerationInProgress) throw new Error("Another generation request or batch is currently being prepared.");
         if (activeVideoJobs.size > 0) throw new Error("A video job is already active. Check that job before submitting another one.");
         generationOperationInProgress = true;
         acquiredGenerationLock = true;
@@ -259,6 +390,85 @@ function createMcpServer(): McpServer {
     },
   );
 
+  server.registerTool(
+    "start_video_batch",
+    {
+      title: "Start batch video generation",
+      description:
+        "Accept multiple image-and-prompt pairs and generate the videos sequentially in the background. This returns a batch_id immediately so the caller can check progress later instead of waiting for a long tool call.",
+      inputSchema: {
+        items: z.array(z.object({
+          image_file: openAiImageFileSchema,
+          image_url: z.string().url().optional().describe("Publicly reachable source image URL. Use only when no ChatGPT image file is available."),
+          prompt: z.string().min(1).max(4000).describe("Motion/camera prompt describing how the input image should animate."),
+          steps: z.union([z.literal(4), z.literal(8), z.literal(12)]).default(8),
+          num_frames: videoFrameCountSchema,
+          fps: videoFpsSchema,
+          seed: z.number().int().nonnegative().optional(),
+        })).min(1).max(12).describe("Batch items to generate sequentially."),
+      },
+      _meta: { "openai/fileParams": ["items.*.image_file"] },
+    },
+    async (args) => {
+      try {
+        await refreshActiveVideoJobs();
+        if (generationOperationInProgress || batchGenerationInProgress) {
+          throw new Error("Another generation request or batch is currently being prepared.");
+        }
+        if (activeVideoJobs.size > 0) {
+          throw new Error("A video job is already active. Check that job before starting a new batch.");
+        }
+        const items: BatchVideoItem[] = args.items.map((item) => {
+          const image = getVideoImageUrl(item);
+          return {
+            imageUrl: image.imageUrl,
+            prompt: item.prompt,
+            steps: item.steps,
+            numFrames: item.num_frames,
+            fps: item.fps,
+            ...(item.seed !== undefined ? { seed: item.seed } : {}),
+          };
+        });
+        batchGenerationInProgress = true;
+        const batch = createBatchVideoJob(items);
+        void processBatchVideoJob(batch.batchId).finally(() => {
+          batchGenerationInProgress = false;
+        });
+        logger.info({ tool: "start_video_batch", batchId: batch.batchId, itemCount: batch.items.length }, "MCP tool invoked");
+        return textResult(`Batch accepted. Batch ID: ${batch.batchId}. Check batch progress with check_video_batch.`, { ok: true, type: "video_batch", ...batch });
+      } catch (error) {
+        batchGenerationInProgress = false;
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "check_video_batch",
+    {
+      title: "Check batch video generation",
+      description: "Read-only. Check a previously submitted batch and return per-item status plus final video URLs when available.",
+      inputSchema: { batch_id: z.string().regex(/^[0-9a-f]{32}$/).describe("32-character hexadecimal batch ID.") },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ batch_id }) => {
+      try {
+        const batch = batchVideoJobs.get(batch_id);
+        if (!batch) throw new Error(`Unknown batch video job: ${batch_id}`);
+        summarizeBatchStatus(batch);
+        const message = batch.status === "completed"
+          ? `Batch completed: ${batch.completedItems}/${batch.totalItems} videos are ready.`
+          : batch.status === "partial_completed"
+            ? `Batch partially completed: ${batch.completedItems}/${batch.totalItems} videos are ready.`
+            : batch.status === "failed"
+              ? `Batch failed: ${batch.failedItems}/${batch.totalItems} items failed.`
+              : `Batch is ${batch.status}: ${batch.completedItems}/${batch.totalItems} complete.`;
+        return textResult(message, { ok: batch.status !== "failed", type: "video_batch", ...batch });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
   server.registerTool(
     "compose_video_story",
     {
@@ -457,3 +667,4 @@ const shutdown = (signal: string) => {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
+

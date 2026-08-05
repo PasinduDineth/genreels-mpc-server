@@ -9,6 +9,8 @@ A local-first, production-style Model Context Protocol (MCP) server that exposes
 - `generate_video_from_image` — accepts a ChatGPT-generated/uploaded image or downloads a public image URL, switches to video mode, submits a 5-second HunyuanVideo job, and returns a job ID.
 - `check_video_job` — read-only job polling; returns `video_url` when completed.
 - `generate_video_and_wait` — backward-compatible asynchronous alias that returns a job ID immediately.
+- `start_video_batch` — accept up to 12 image/prompt pairs and generate them sequentially in the background.
+- `check_video_batch` — read-only batch status tool that returns per-item job IDs, statuses, and final URLs.
 
 ## Architecture
 
@@ -109,6 +111,8 @@ Recommended test order:
 6. Open `video_url`
 
 `generate_video_and_wait` is retained as a backward-compatible alias, but it also returns immediately. Poll `check_video_job` for the final result.
+
+For multiple videos, prefer `start_video_batch` followed by `check_video_batch`. The batch runs sequentially in the background and returns one compact status object for all items.
 
 Video tools accept `num_frames` and `fps`. Frame counts must follow `4n + 1`:
 
@@ -258,3 +262,4 @@ npx @modelcontextprotocol/inspector@latest \
 ```
 
 Then refresh the app metadata in ChatGPT.
+
