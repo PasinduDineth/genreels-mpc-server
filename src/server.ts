@@ -185,6 +185,11 @@ type OpenAiFileParam = {
   file_name?: string;
 };
 
+function isLocalFileReference(value: string): boolean {
+  if (value.startsWith("file://")) return true;
+  return path.isAbsolute(value);
+}
+
 const openAiImageFileSchema = z.union([
   z.object({
     download_url: z.string().url().describe("Temporary HTTPS download URL supplied by ChatGPT."),
@@ -192,8 +197,8 @@ const openAiImageFileSchema = z.union([
     mime_type: z.string().optional().describe("Image MIME type."),
     file_name: z.string().optional().describe("Original image filename."),
   }).passthrough(),
-  z.string().describe("ChatGPT platform file reference; the client replaces this with a downloadable file object."),
-]).optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation.");
+  z.string().describe("ChatGPT platform file reference, absolute local file path, or file:// URL; the client may replace this with a downloadable file object."),
+]).optional().describe("ChatGPT-generated or uploaded source image. Use this for an image available in the conversation, or an absolute local path when running locally.");
 
 const captionSchema = z.object({
   text: z.string(),
@@ -210,7 +215,10 @@ const videoFpsSchema = z.number().int().min(8).max(24).default(16).describe("Out
 function getVideoImageUrl(args: { image_url?: string; image_file?: unknown }): { imageUrl: string; source: "url" | "chatgpt_file"; fileId?: string } {
   if (args.image_file !== undefined && args.image_file !== null) {
     if (typeof args.image_file === "string") {
-      throw new Error("ChatGPT passed an unresolved local file reference instead of a downloadable file object. Refresh or recreate the connector, reattach the image, and try again.");
+      if (isLocalFileReference(args.image_file)) {
+        return { imageUrl: args.image_file, source: "chatgpt_file" };
+      }
+      throw new Error("ChatGPT passed an unresolved local file reference instead of a downloadable file object or absolute local file path. Refresh or recreate the connector, reattach the image, or upload it with /files/upload/image and try again.");
     }
     if (typeof args.image_file !== "object" || Array.isArray(args.image_file)) {
       throw new Error("ChatGPT did not provide a usable image file reference. Refresh or recreate the connector, reattach the image, and try again.");
