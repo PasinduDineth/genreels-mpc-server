@@ -2,8 +2,9 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type Mode = "off" | "tts" | "video";
 
@@ -274,6 +275,13 @@ export async function generateSpeech(input: {
 }
 
 async function fetchImageBytes(imageUrl: string): Promise<{ bytes: Uint8Array; contentType: string; filename: string }> {
+  const localPath = resolveLocalImagePath(imageUrl);
+  if (localPath) {
+    const bytes = new Uint8Array(await readFile(localPath));
+    const filename = path.basename(localPath) || "input.png";
+    return { bytes, contentType: inferImageContentType(filename), filename };
+  }
+
   let url = new URL(internalAbsoluteUrl(imageUrl));
   let response: Response | undefined;
   const controller = new AbortController();
@@ -321,6 +329,27 @@ async function fetchImageBytes(imageUrl: string): Promise<{ bytes: Uint8Array; c
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function resolveLocalImagePath(imageUrl: string): string | null {
+  if (imageUrl.startsWith("file://")) {
+    const filePath = fileURLToPath(imageUrl);
+    if (path.isAbsolute(filePath)) return filePath;
+    return null;
+  }
+  if (path.isAbsolute(imageUrl)) return imageUrl;
+  return null;
+}
+
+function inferImageContentType(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".bmp") return "image/bmp";
+  if (ext === ".tif" || ext === ".tiff") return "image/tiff";
+  return "application/octet-stream";
 }
 
 export async function startVideo(input: {
@@ -390,3 +419,5 @@ export async function waitForVideo(jobId: string): Promise<VideoJobResult & { vi
 
   throw new Error(`Timed out waiting for video job '${jobId}' after ${config.VIDEO_POLL_TIMEOUT_MS} ms`);
 }
+
+
