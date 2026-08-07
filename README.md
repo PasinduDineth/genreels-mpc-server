@@ -12,6 +12,8 @@ A local-first, production-style Model Context Protocol (MCP) server that exposes
 - `start_video_batch` — accept up to 12 image/prompt pairs and generate them sequentially in the background.
 - `check_video_batch` — read-only batch status tool that returns per-item job IDs, statuses, and final URLs.
 
+The public gateway also exposes `POST /files/upload/image` for clients that only have a local image path. Send the raw image bytes with an `image/*` `Content-Type`; the response contains a public `image_url` that can be passed to the video tools.
+
 ## Architecture
 
 ChatGPT -> HTTPS -> RunPod gateway/MCP -> Qwen3-TTS or HunyuanVideo

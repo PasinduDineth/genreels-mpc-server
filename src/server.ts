@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -563,6 +563,28 @@ async function sendFileWithRange(req: IncomingMessage, res: ServerResponse, file
   createReadStream(filePath).pipe(res);
 }
 
+const uploadImageTypes = new Map([
+  ["image/png", ".png"],
+  ["image/jpeg", ".jpg"],
+  ["image/webp", ".webp"],
+  ["image/gif", ".gif"],
+]);
+
+async function readRequestBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const declaredSize = Number(req.headers["content-length"] ?? 0);
+  if (declaredSize > maxBytes) throw new Error("Image exceeds the configured upload size limit");
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += bytes.length;
+    if (total > maxBytes) throw new Error("Image exceeds the configured upload size limit");
+    chunks.push(bytes);
+  }
+  if (total === 0) throw new Error("Image upload was empty");
+  return Buffer.concat(chunks, total);
+}
+
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const requestId = crypto.randomUUID();
   const started = Date.now();
@@ -588,6 +610,49 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       const message = error instanceof Error ? error.message : String(error);
       res.writeHead(503, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ status: "degraded", error: message }));
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/files/upload/image") {
+    try {
+      const contentType = req.headers["content-type"]?.split(";", 1)[0]?.toLowerCase() ?? "";
+      const extension = uploadImageTypes.get(contentType);
+      if (!extension) throw new Error("Content-Type must be image/png, image/jpeg, image/webp, or image/gif");
+      const bytes = await readRequestBody(req, config.IMAGE_UPLOAD_MAX_BYTES);
+      await mkdir(config.IMAGE_UPLOAD_DIR, { recursive: true });
+      const filename = `${crypto.randomUUID()}${extension}`;
+      await writeFile(path.join(config.IMAGE_UPLOAD_DIR, filename), bytes);
+      const publicBaseUrl = config.MCP_PUBLIC_BASE_URL;
+      if (!publicBaseUrl) throw new Error("MCP_PUBLIC_BASE_URL is required for image uploads");
+      const imageUrl = `${publicBaseUrl}/files/generated/uploads/${encodeURIComponent(filename)}`;
+      res.writeHead(201, { "content-type": "application/json", "access-control-allow-origin": "*" });
+      res.end(JSON.stringify({ ok: true, image_url: imageUrl, mime_type: contentType, byte_length: bytes.length }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const statusCode = message.includes("size limit") ? 413 : 400;
+      res.writeHead(statusCode, { "content-type": "application/json", "access-control-allow-origin": "*" });
+      res.end(JSON.stringify({ ok: false, error: message }));
+    }
+    return;
+  }
+
+  const uploadedImagePrefix = "/files/generated/uploads/";
+  if (req.method === "GET" && url.pathname.startsWith(uploadedImagePrefix)) {
+    const filename = path.basename(decodeURIComponent(url.pathname.slice(uploadedImagePrefix.length)));
+    const filePath = path.join(config.IMAGE_UPLOAD_DIR, filename);
+    const extension = path.extname(filename).toLowerCase();
+    const contentType = extension === ".png" ? "image/png"
+      : extension === ".jpg" || extension === ".jpeg" ? "image/jpeg"
+        : extension === ".webp" ? "image/webp"
+          : extension === ".gif" ? "image/gif"
+            : "";
+    try {
+      if (!contentType) throw new Error("Unsupported image type");
+      await sendFileWithRange(req, res, filePath, contentType, filename);
+    } catch {
+      res.writeHead(404, { "content-type": "application/json", "access-control-allow-origin": "*" });
+      res.end(JSON.stringify({ detail: "Uploaded image not found." }));
     }
     return;
   }

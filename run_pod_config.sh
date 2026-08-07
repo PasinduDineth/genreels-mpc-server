@@ -2562,6 +2562,16 @@ async def connector_proxy(request: Request):
     return await generic_proxy(request, MCP_BASE, "/mcp")
 
 
+@APP.api_route("/files/upload/image", methods=["POST"])
+async def image_upload_proxy(request: Request):
+    return await generic_proxy(request, MCP_BASE, "/files/upload/image")
+
+
+@APP.api_route("/files/generated/uploads/{path:path}", methods=["GET"])
+async def uploaded_image_files_proxy(request: Request, path: str):
+    return await generic_proxy(request, MCP_BASE, f"/files/generated/uploads/{path}")
+
+
 @APP.api_route("/files/generated/remotion/{path:path}", methods=["GET"])
 async def remotion_files_proxy(request: Request, path: str):
     # Serve rendered MP4s through the gateway so ChatGPT can reach them.
@@ -3168,6 +3178,7 @@ if [[ "$MCP_ENABLED" == "true" ]]; then
       RUNPOD_PUBLIC_BASE_URL="$MCP_PUBLIC_GATEWAY_URL" \
       MCP_PUBLIC_BASE_URL="$MCP_PUBLIC_BASE_URL" \
       AUDIO_OUTPUT_DIR="$AUDIO_OUTPUT_DIR" \
+      IMAGE_UPLOAD_DIR="$GENERATED_DIR/uploads" \
       VIDEO_JOB_DIR="$VIDEO_JOB_DIR" \
       node "$MCP_DIR/dist/server.js" \
       >>"$MCP_LOG" 2>&1 &
