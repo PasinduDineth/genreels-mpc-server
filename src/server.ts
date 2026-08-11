@@ -627,12 +627,12 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       const contentType = req.headers["content-type"]?.split(";", 1)[0]?.toLowerCase() ?? "";
       const extension = uploadImageTypes.get(contentType);
       if (!extension) throw new Error("Content-Type must be image/png, image/jpeg, image/webp, or image/gif");
+      const publicBaseUrl = config.MCP_PUBLIC_BASE_URL;
+      if (!publicBaseUrl) throw new Error("MCP_PUBLIC_BASE_URL is required for image uploads");
       const bytes = await readRequestBody(req, config.IMAGE_UPLOAD_MAX_BYTES);
       await mkdir(config.IMAGE_UPLOAD_DIR, { recursive: true });
       const filename = `${crypto.randomUUID()}${extension}`;
       await writeFile(path.join(config.IMAGE_UPLOAD_DIR, filename), bytes);
-      const publicBaseUrl = config.MCP_PUBLIC_BASE_URL;
-      if (!publicBaseUrl) throw new Error("MCP_PUBLIC_BASE_URL is required for image uploads");
       const imageUrl = `${publicBaseUrl}/files/generated/uploads/${encodeURIComponent(filename)}`;
       res.writeHead(201, { "content-type": "application/json", "access-control-allow-origin": "*" });
       res.end(JSON.stringify({ ok: true, image_url: imageUrl, mime_type: contentType, byte_length: bytes.length }));

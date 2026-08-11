@@ -14,6 +14,29 @@ A local-first, production-style Model Context Protocol (MCP) server that exposes
 
 The public gateway also exposes `POST /files/upload/image` for clients that only have a local image path. Send the raw image bytes with an `image/*` `Content-Type`; the response contains a public `image_url` that can be passed to the video tools.
 
+For example, Hermes can upload a PNG directly from its local filesystem:
+
+```bash
+curl --fail-with-body \
+  -X POST \
+  -H "Content-Type: image/png" \
+  --data-binary "@C:/Users/Pasindu/path/to/scene.png" \
+  "https://<pod-id>-8000.proxy.runpod.net/files/upload/image"
+```
+
+The response has this shape:
+
+```json
+{
+  "ok": true,
+  "image_url": "https://<pod-id>-8000.proxy.runpod.net/files/generated/uploads/<id>.png",
+  "mime_type": "image/png",
+  "byte_length": 123456
+}
+```
+
+Use `image_url` as the image input to `generate_video_from_image` or in each `start_video_batch` item. JPEG, WebP, and GIF uploads are also accepted; set the matching `Content-Type`. The default per-file limit is 20 MB and can be changed with `IMAGE_UPLOAD_MAX_BYTES`.
+
 ## Architecture
 
 ChatGPT -> HTTPS -> RunPod gateway/MCP -> Qwen3-TTS or HunyuanVideo

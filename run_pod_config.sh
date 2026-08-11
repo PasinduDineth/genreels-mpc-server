@@ -3161,7 +3161,10 @@ if [[ "$MCP_ENABLED" == "true" ]]; then
       fatal "Set MCP_PUBLIC_GATEWAY_URL because RUNPOD_POD_ID is unavailable."
     fi
     if [[ -z "$MCP_PUBLIC_BASE_URL" && -n "${RUNPOD_POD_ID:-}" ]]; then
-      MCP_PUBLIC_BASE_URL="https://${RUNPOD_POD_ID}-${MCP_PORT}.proxy.runpod.net"
+      # Return uploaded media through the primary gateway. RunPod can reject
+      # public traffic to secondary ports, while port 8000 explicitly proxies
+      # both the upload endpoint and the generated upload files.
+      MCP_PUBLIC_BASE_URL="$MCP_PUBLIC_GATEWAY_URL"
     fi
     if [[ -z "$MCP_PUBLIC_BASE_URL" ]]; then
       fatal "Set MCP_PUBLIC_BASE_URL because RUNPOD_POD_ID is unavailable."
